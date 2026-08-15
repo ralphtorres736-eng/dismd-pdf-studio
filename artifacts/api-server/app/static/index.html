@@ -3,304 +3,543 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PDF Assistant</title>
+  <title>DISMD AI — Secure PDF Studio</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
           colors: {
-            navy:  { DEFAULT: '#1a2540', light: '#243057', dark: '#111829' },
-            ink:   { DEFAULT: '#1a1a2e', light: '#2d3561' },
-            steel: { DEFAULT: '#2b5797', light: '#3a6dba', muted: '#d6e4f7' },
-            parchment: { DEFAULT: '#f5f3ee', dark: '#ece9e1' },
-            sage:  '#1a7f4b',
-            rose:  '#c0392b',
+            charcoal:  { DEFAULT: '#1A1A2E', light: '#252540', dark: '#111120' },
+            navy:      { DEFAULT: '#16213E', light: '#1e2d56', dark: '#0f1628' },
+            gold:      { DEFAULT: '#C9A84C', light: '#dbbf6a', dark: '#a8862f', muted: '#C9A84C22' },
+            slate:     { DEFAULT: '#2E3250', light: '#3a4070', muted: '#4a5080' },
+            surface:   { DEFAULT: '#1F2040', light: '#272848', card: '#232444' },
+            success:   '#2ecc71',
+            danger:    '#e74c3c',
           },
-          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          fontFamily: { sans: ['Inter', 'IBM Plex Sans', 'system-ui', 'sans-serif'] },
+          boxShadow: {
+            'gold': '0 0 0 2px #C9A84C',
+            'gold-sm': '0 0 0 1px #C9A84C88',
+            'card': '0 2px 12px rgba(0,0,0,0.4)',
+            'card-hover': '0 4px 20px rgba(0,0,0,0.55)',
+          },
         },
       },
     };
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f5f3ee; }
-    html, body, #app { height: 100%; }
-
-    /* Upload drop zone */
-    .drop-zone { transition: background 0.2s, border-color 0.2s; }
-    .drop-zone.drag-over { background: #d6e4f7; border-color: #2b5797; }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Inter', 'IBM Plex Sans', system-ui, sans-serif; background: #1A1A2E; color: #e2e4f0; }
+    html, body, #app { height: 100%; overflow: hidden; }
 
     /* Scrollbars */
-    .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
-    .scroll-thin::-webkit-scrollbar-track { background: transparent; }
-    .scroll-thin::-webkit-scrollbar-thumb { background: #c8c4bb; border-radius: 2px; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #3a4070; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #C9A84C66; }
 
-    /* Chat bubbles */
-    .bubble-ai   { background: #e8eef7; border-radius: 2px 14px 14px 14px; }
-    .bubble-user { background: #2b5797; color: white; border-radius: 14px 2px 14px 14px; }
-    .bubble-sys  { background: #f0ede6; border: 1px solid #d8d3c8; border-radius: 8px; font-size: 0.78rem; }
+    /* Upload drop zone */
+    .drop-zone {
+      border: 2px dashed #C9A84C66;
+      transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+    }
+    .drop-zone:hover { border-color: #C9A84C; background: #C9A84C0a; }
+    .drop-zone.drag-over {
+      background: #C9A84C14;
+      border-color: #C9A84C;
+      box-shadow: 0 0 0 4px #C9A84C22;
+    }
 
     /* File card */
-    .file-card { cursor: pointer; transition: background 0.15s, box-shadow 0.15s; }
-    .file-card:hover { background: #e8eef7; }
-    .file-card.selected { background: #d6e4f7; border-left: 3px solid #2b5797; }
+    .file-card {
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .file-card:hover { background: #1e2d5688; border-left-color: #C9A84C66; }
+    .file-card.selected { background: #16213e; border-left-color: #C9A84C; }
 
     /* Thumbnail */
     .thumb { transition: box-shadow 0.15s, transform 0.15s; }
-    .thumb:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.18); transform: translateY(-1px); }
+    .thumb:hover { box-shadow: 0 0 0 2px #C9A84C, 0 6px 16px rgba(0,0,0,0.5); transform: translateY(-2px); }
+
+    /* Chat bubbles */
+    .bubble-ai {
+      background: #1F2040;
+      border: 1px solid #2E3250;
+      border-radius: 2px 14px 14px 14px;
+    }
+    .bubble-user {
+      background: linear-gradient(135deg, #a8862f, #C9A84C);
+      color: #1A1A2E;
+      font-weight: 500;
+      border-radius: 14px 2px 14px 14px;
+    }
+    .bubble-sys {
+      background: #1F2040;
+      border: 1px solid #2E3250;
+      border-radius: 8px;
+      font-size: 0.78rem;
+    }
 
     /* Spinner */
-    .spinner { width: 18px; height: 18px; border: 2px solid #c8c4bb; border-top-color: #2b5797; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid #3a4070;
+      border-top-color: #C9A84C;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Fade-in */
-    .fade-in { animation: fadeIn 0.3s ease; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.25s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
-    /* Tab underline */
-    .tab-btn { border-bottom: 2px solid transparent; }
-    .tab-btn.active { border-bottom-color: #2b5797; color: #2b5797; }
+    /* Tab buttons */
+    .tab-btn {
+      border-bottom: 2px solid transparent;
+      color: #7a80a8;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover { color: #b0b8d8; }
+    .tab-btn.active { border-bottom-color: #C9A84C; color: #C9A84C; }
 
-    /* Toolbar button */
-    .op-btn { transition: background 0.15s; }
-    .op-btn:hover { background: #d6e4f7; }
-    .op-btn:active { background: #c2d8f5; }
+    /* Op buttons */
+    .op-btn {
+      background: #1F2040;
+      border: 1px solid #2E3250;
+      color: #c0c4e0;
+      transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+    }
+    .op-btn:hover {
+      background: #252548;
+      border-color: #C9A84C;
+      color: #C9A84C;
+      box-shadow: 0 0 0 1px #C9A84C44;
+    }
+    .op-btn:active { background: #C9A84C1a; }
+
+    /* Input fields */
+    .dark-input {
+      background: #13142a;
+      border: 1px solid #2E3250;
+      color: #e2e4f0;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .dark-input:focus {
+      outline: none;
+      border-color: #C9A84C;
+      box-shadow: 0 0 0 2px #C9A84C22;
+    }
+    .dark-input::placeholder { color: #4a5080; }
+
+    /* Select */
+    .dark-select {
+      background: #13142a;
+      border: 1px solid #2E3250;
+      color: #e2e4f0;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23C9A84C' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .dark-select:focus {
+      outline: none;
+      border-color: #C9A84C;
+      box-shadow: 0 0 0 2px #C9A84C22;
+    }
+    .dark-select option { background: #13142a; }
+
+    /* Section cards in manual tab */
+    .op-card {
+      background: #1F2040;
+      border: 1px solid #2E3250;
+      border-radius: 10px;
+      transition: border-color 0.2s;
+    }
+    .op-card:focus-within { border-color: #C9A84C55; }
+
+    /* Download buttons */
+    .btn-gold {
+      background: #C9A84C;
+      color: #1A1A2E;
+      font-weight: 600;
+      transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+    }
+    .btn-gold:hover { background: #dbbf6a; box-shadow: 0 2px 12px #C9A84C55; transform: translateY(-1px); }
+    .btn-gold:active { background: #a8862f; transform: translateY(0); }
+    .btn-gold:disabled { background: #4a4030; color: #7a6840; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid #C9A84C66;
+      color: #C9A84C;
+      font-weight: 500;
+      transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .btn-ghost:hover { background: #C9A84C14; border-color: #C9A84C; box-shadow: 0 0 0 1px #C9A84C44; }
+    .btn-ghost:active { background: #C9A84C22; }
+    .btn-ghost:disabled { border-color: #2E3250; color: #3a4070; cursor: not-allowed; }
+
+    /* Security banner pulse */
+    @keyframes badgePulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .security-dot { animation: badgePulse 2.5s ease-in-out infinite; }
+
+    /* Merge list row */
+    .merge-row { border-bottom: 1px solid #2E3250; }
+    .merge-row:last-child { border-bottom: none; }
+
+    /* Page badge */
+    .page-badge {
+      background: #C9A84C22;
+      color: #C9A84C;
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 10px;
+      letter-spacing: 0.02em;
+    }
+
+    /* Loading overlay on buttons */
+    .btn-loading { position: relative; pointer-events: none; }
+    .btn-loading::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: rgba(0,0,0,0.3);
+    }
   </style>
 </head>
 <body>
 
 <div id="app" class="flex flex-col h-full">
 
-  <!-- ── Top Bar ── -->
-  <header class="flex items-center justify-between px-5 py-3 bg-navy text-white shadow-md flex-shrink-0">
+  <!-- ── TOP NAVBAR ── -->
+  <header class="flex items-center justify-between px-5 py-3 bg-charcoal-dark border-b border-slate flex-shrink-0" style="background:#13142a;">
     <div class="flex items-center gap-3">
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="4" y="2" width="16" height="20" rx="2" fill="#ffffff22" stroke="#fff" stroke-width="1.5"/>
-        <rect x="8" y="6" width="8" height="1.5" rx=".75" fill="#fff"/>
-        <rect x="8" y="9.5" width="8" height="1.5" rx=".75" fill="#fff"/>
-        <rect x="8" y="13" width="5" height="1.5" rx=".75" fill="#fff"/>
-        <path d="M17 17l7 7" stroke="#3a6dba" stroke-width="2" stroke-linecap="round"/>
-        <circle cx="17" cy="17" r="4" fill="#3a6dba" stroke="#fff" stroke-width="1.2"/>
+      <!-- Shield / Lock Icon -->
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M16 3L4 8v8c0 7.18 5.14 13.89 12 15.5C22.86 29.89 28 23.18 28 16V8L16 3z" fill="#C9A84C22" stroke="#C9A84C" stroke-width="1.5"/>
+        <path d="M16 3L4 8v8c0 7.18 5.14 13.89 12 15.5C22.86 29.89 28 23.18 28 16V8L16 3z" fill="url(#shieldGrad)"/>
+        <path d="M11 16l3.5 3.5L21 12" stroke="#C9A84C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <defs>
+          <linearGradient id="shieldGrad" x1="16" y1="3" x2="16" y2="31" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#C9A84C" stop-opacity="0.18"/>
+            <stop offset="1" stop-color="#C9A84C" stop-opacity="0.04"/>
+          </linearGradient>
+        </defs>
       </svg>
       <div>
-        <div class="font-semibold tracking-wide text-sm">PDF Assistant</div>
-        <div class="text-xs text-blue-200 leading-none">Legal-grade document editing</div>
+        <div class="font-bold tracking-wide text-sm text-white" style="letter-spacing:0.03em;">DISMD AI <span class="text-gold font-normal">—</span> Secure PDF Studio</div>
+        <div class="text-xs leading-none mt-0.5" style="color:#7a80a8;">Legal-grade · Privacy-first · Zero cloud leak</div>
       </div>
     </div>
     <div class="flex items-center gap-3">
-      <span id="session-badge" class="text-xs text-blue-200 hidden">
-        Session active &mdash; files deleted on reset or after 2 h idle
+      <span id="session-badge" class="hidden text-xs px-2.5 py-1 rounded-full" style="background:#C9A84C18;color:#C9A84C;border:1px solid #C9A84C44;">
+        Session active
       </span>
-      <button onclick="resetSession()" class="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white rounded border border-white/20 transition">
+      <button onclick="resetSession()" class="px-3 py-1.5 text-xs btn-ghost rounded-md">
         Clear Session
       </button>
     </div>
   </header>
 
-  <!-- ── Main Content ── -->
+  <!-- ── SECURITY BANNER ── -->
+  <div class="flex-shrink-0 px-5 py-2 flex items-center gap-2.5" style="background:#0e0f22;border-bottom:1px solid #1e2040;">
+    <span class="security-dot flex-shrink-0 w-1.5 h-1.5 rounded-full" style="background:#C9A84C;"></span>
+    <span class="text-xs" style="color:#7a80a8;">
+      <span style="color:#C9A84C;font-weight:600;">DISMD AI PRIVACY GUARANTEE:</span>
+      Zero-Cloud-Leak Node. All PDF processing is executed locally via PyMuPDF. Raw document binaries, text, and client PII are
+      <span class="font-semibold" style="color:#e2e4f0;">NEVER</span> transmitted to external LLM APIs.
+    </span>
+  </div>
+
+  <!-- ── MAIN WORKSPACE ── -->
   <div class="flex flex-1 min-h-0">
 
-    <!-- LEFT PANEL: Files + Thumbnails -->
-    <aside class="flex flex-col w-80 min-w-64 bg-white border-r border-parchment-dark shadow-sm flex-shrink-0">
+    <!-- ═══════════════════════════════════════════
+         LEFT SIDEBAR
+    ═══════════════════════════════════════════ -->
+    <aside class="flex flex-col flex-shrink-0 border-r" style="width:320px;background:#16213E;border-color:#1e2d56;">
 
-      <!-- Upload zone -->
-      <div class="p-3 border-b border-parchment-dark">
+      <!-- SECURE VAULT DROP ZONE -->
+      <div class="p-3 border-b" style="border-color:#1e2d56;">
         <div
           id="drop-zone"
-          class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-steel transition"
+          class="drop-zone rounded-xl p-5 text-center cursor-pointer"
           onclick="document.getElementById('file-input').click()"
           ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
         >
-          <div class="text-steel text-lg font-light mb-1">Upload PDFs</div>
-          <div class="text-xs text-gray-400">Drag &amp; drop or click to browse</div>
-          <div class="text-xs text-gray-300 mt-1">Up to 500 MB per file</div>
-          <div id="upload-spinner" class="hidden flex justify-center mt-2">
+          <!-- Lock icon -->
+          <div class="flex justify-center mb-2">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+              <rect x="6" y="13" width="16" height="11" rx="3" fill="#C9A84C22" stroke="#C9A84C" stroke-width="1.4"/>
+              <path d="M9 13v-3a5 5 0 0110 0v3" stroke="#C9A84C" stroke-width="1.4" stroke-linecap="round"/>
+              <circle cx="14" cy="18.5" r="1.5" fill="#C9A84C"/>
+            </svg>
+          </div>
+          <div class="text-sm font-semibold mb-0.5" style="color:#C9A84C;">Drag &amp; drop legal PDFs here</div>
+          <div class="text-xs" style="color:#4a5080;">or click to browse &nbsp;·&nbsp; up to 500 MB</div>
+          <div id="upload-spinner" class="hidden flex justify-center mt-3">
             <div class="spinner"></div>
           </div>
         </div>
         <input id="file-input" type="file" accept=".pdf" multiple class="hidden" onchange="handleFileInput(event)" />
       </div>
 
-      <!-- Document list -->
-      <div class="flex-shrink-0 px-3 pt-3 pb-1">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Documents</span>
-          <span id="file-count" class="text-xs text-gray-400">0 files</span>
-        </div>
+      <!-- DOCUMENT LIST -->
+      <div class="flex-shrink-0 px-3 pt-3 pb-1 flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-widest" style="color:#4a5080;">Case Documents</span>
+        <span id="file-count" class="text-xs" style="color:#4a5080;">0 files</span>
       </div>
-      <div id="file-list" class="flex-shrink-0 max-h-48 overflow-y-auto scroll-thin px-2 pb-2">
-        <div class="text-xs text-gray-400 text-center py-4">No documents yet</div>
+      <div id="file-list" class="flex-shrink-0 max-h-44 overflow-y-auto px-2 pb-1">
+        <div class="text-xs text-center py-5" style="color:#3a4070;">No documents yet</div>
       </div>
 
-      <!-- Divider -->
-      <div class="border-t border-parchment-dark"></div>
+      <!-- DIVIDER -->
+      <div class="border-t mx-3" style="border-color:#1e2d56;"></div>
 
-      <!-- Thumbnail strip for selected file -->
+      <!-- PAGE THUMBNAILS -->
       <div class="flex-shrink-0 px-3 pt-2 pb-1 flex items-center justify-between">
-        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider" id="thumb-label">Pages</span>
-        <span id="thumb-file-name" class="text-xs text-gray-400 truncate max-w-32"></span>
+        <span class="text-xs font-semibold uppercase tracking-widest" style="color:#4a5080;" id="thumb-label">Page Preview</span>
+        <span id="thumb-file-name" class="text-xs truncate max-w-28" style="color:#C9A84C66;"></span>
       </div>
-      <div id="thumb-strip" class="flex-1 overflow-y-auto scroll-thin px-2 pb-3">
-        <div class="text-xs text-gray-400 text-center py-6">Select a document to preview pages</div>
+      <div id="thumb-strip" class="flex-1 overflow-y-auto px-2 pb-3">
+        <div class="text-xs text-center py-8" style="color:#3a4070;">Select a document to preview pages</div>
       </div>
 
-      <!-- Bottom actions -->
-      <div class="border-t border-parchment-dark p-3 flex gap-2">
-        <button onclick="downloadAll()" class="flex-1 text-xs py-2 bg-steel text-white rounded hover:bg-steel-light transition font-medium">
-          Download All
+      <!-- DOWNLOAD ACTIONS -->
+      <div class="border-t p-3 flex gap-2 flex-shrink-0" style="border-color:#1e2d56;">
+        <button onclick="downloadAll()" class="flex-1 text-xs py-2 rounded-lg btn-gold">
+          ↓ Download All
         </button>
-        <button id="download-selected-btn" onclick="downloadSelected()" class="flex-1 text-xs py-2 border border-steel text-steel rounded hover:bg-steel-muted transition font-medium" disabled>
-          Download Selected
+        <button id="download-selected-btn" onclick="downloadSelected()" class="flex-1 text-xs py-2 rounded-lg btn-ghost" disabled>
+          ↓ Selected
         </button>
       </div>
     </aside>
 
-    <!-- RIGHT PANEL: Chat + Operations -->
-    <main class="flex flex-col flex-1 min-w-0">
+    <!-- ═══════════════════════════════════════════
+         RIGHT MAIN PANEL
+    ═══════════════════════════════════════════ -->
+    <main class="flex flex-col flex-1 min-w-0" style="background:#1A1A2E;">
 
-      <!-- Tabs -->
-      <div class="flex border-b border-parchment-dark bg-white px-4 flex-shrink-0">
-        <button class="tab-btn active px-4 py-2.5 text-sm font-medium text-gray-600 mr-1" onclick="switchTab('chat', this)">AI Chat</button>
-        <button class="tab-btn px-4 py-2.5 text-sm font-medium text-gray-600" onclick="switchTab('manual', this)">Manual Controls</button>
+      <!-- TABS -->
+      <div class="flex border-b flex-shrink-0 px-5" style="background:#13142a;border-color:#2E3250;">
+        <button class="tab-btn active px-4 py-3 text-sm font-medium mr-1" onclick="switchTab('chat', this)">
+          AI Chat Assistant
+        </button>
+        <button class="tab-btn px-4 py-3 text-sm font-medium" onclick="switchTab('manual', this)">
+          Manual Controls
+        </button>
       </div>
 
-      <!-- CHAT TAB -->
+      <!-- ── AI CHAT TAB ── -->
       <div id="tab-chat" class="flex flex-col flex-1 min-h-0">
-        <!-- Chat history -->
-        <div id="chat-log" class="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-3">
-          <div class="bubble-ai p-3 max-w-lg text-sm text-gray-700 fade-in">
-            <span class="font-medium text-steel block mb-1 text-xs uppercase tracking-wide">PDF Assistant</span>
-            Upload your PDF documents using the panel on the left, then describe what you need done in plain English. For example:<br><br>
-            <span class="italic text-gray-500">"Remove pages 3 through 5 from Response.pdf, then merge all exhibits into a single document called Final-Response.pdf"</span>
+
+        <!-- Chat log -->
+        <div id="chat-log" class="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          <div class="flex gap-3 items-start fade-in">
+            <!-- AI avatar -->
+            <div class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5" style="background:linear-gradient(135deg,#a8862f,#C9A84C);">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M7 1L2 3.5v4C2 10.5 4.5 13 7 13.5 9.5 13 12 10.5 12 7.5v-4L7 1z" fill="#1A1A2E" fill-opacity=".7" stroke="#1A1A2E" stroke-width="1"/>
+                <path d="M5 7.2l1.5 1.5L9 5.5" stroke="#1A1A2E" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="bubble-ai px-4 py-3 max-w-xl">
+              <span class="block text-xs font-semibold uppercase tracking-wider mb-1.5" style="color:#C9A84C;">DISMD AI Assistant</span>
+              <p class="text-sm" style="color:#c0c4e0;line-height:1.6;">
+                Upload your confidential PDF documents using the secure vault on the left, then describe what you need done in plain English. For example:
+              </p>
+              <p class="text-sm mt-2 italic" style="color:#6a709a;">
+                "Remove pages 3 through 5 from Response.pdf, then merge all exhibits into a single document called Final-Response.pdf"
+              </p>
+            </div>
           </div>
         </div>
 
         <!-- Chat input -->
-        <div class="border-t border-parchment-dark bg-white p-3 flex-shrink-0">
-          <div class="flex gap-2 items-end">
+        <div class="border-t p-4 flex-shrink-0" style="background:#13142a;border-color:#2E3250;">
+          <div class="flex gap-3 items-end">
             <textarea
               id="chat-input"
               rows="2"
-              class="flex-1 resize-none border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-steel focus:ring-1 focus:ring-steel placeholder-gray-300"
+              class="dark-input flex-1 resize-none rounded-xl px-4 py-2.5 text-sm"
               placeholder="Describe what you need done with your documents..."
               onkeydown="chatKeydown(event)"
             ></textarea>
             <button
               id="send-btn"
               onclick="sendChat()"
-              class="px-4 py-2 bg-steel text-white rounded-lg text-sm font-medium hover:bg-steel-light transition flex-shrink-0"
+              class="btn-gold px-5 py-2.5 rounded-xl text-sm flex-shrink-0"
             >
               Send
             </button>
           </div>
-          <div class="text-xs text-gray-300 mt-1.5">Press Ctrl+Enter to send. Your document content is never sent to AI &mdash; only file names and page counts.</div>
+          <!-- Privacy notice -->
+          <div class="flex items-center gap-2 mt-2.5">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" class="flex-shrink-0">
+              <path d="M6 1L1.5 3v3.5c0 2.5 2 4.5 4.5 5 2.5-.5 4.5-2.5 4.5-5V3L6 1z" fill="#C9A84C44" stroke="#C9A84C" stroke-width=".9"/>
+              <path d="M4.2 6l1.3 1.3L7.8 4.5" stroke="#C9A84C" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="text-xs" style="color:#4a5080;">
+              <span style="color:#C9A84C88;">Privacy Protected:</span>
+              Document content is never sent to AI — parser receives file names and page counts only. Press Ctrl+Enter to send.
+            </span>
+          </div>
         </div>
       </div>
 
-      <!-- MANUAL CONTROLS TAB -->
-      <div id="tab-manual" class="hidden flex-1 overflow-y-auto scroll-thin p-5 space-y-4">
+      <!-- ── MANUAL CONTROLS TAB ── -->
+      <div id="tab-manual" class="hidden flex-1 overflow-y-auto p-5 space-y-5">
 
-        <!-- File selector for operations -->
+        <!-- Target document selector -->
         <div>
-          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Target Document</label>
-          <select id="op-file-select" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-steel bg-white">
-            <option value="">-- Select a document --</option>
+          <label class="block text-xs font-semibold uppercase tracking-widest mb-2" style="color:#4a5080;">Target Document</label>
+          <select id="op-file-select" class="dark-select w-full rounded-lg px-3 py-2.5 text-sm">
+            <option value="">— Select a document —</option>
           </select>
         </div>
 
-        <!-- Operation cards -->
-        <div class="grid grid-cols-1 gap-3">
-
-          <!-- Delete pages -->
-          <div class="bg-white border border-parchment-dark rounded-lg p-4">
-            <div class="font-medium text-sm text-gray-700 mb-2">Delete Pages</div>
-            <div class="flex gap-2 items-center">
-              <input id="del-pages" type="text" placeholder="e.g. 3,4,5 or 3-7" class="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
-              <button onclick="manualDeletePages()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Delete</button>
-            </div>
-            <div class="text-xs text-gray-400 mt-1">Enter page numbers separated by commas, or a range like 3-7.</div>
+        <!-- ── PAGE ACTIONS CARD ── -->
+        <div>
+          <div class="text-xs font-semibold uppercase tracking-widest mb-2 flex items-center gap-2" style="color:#C9A84C88;">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="2" stroke="#C9A84C88" stroke-width="1.2"/><path d="M3 4h6M3 6h4" stroke="#C9A84C88" stroke-width="1" stroke-linecap="round"/></svg>
+            Page Actions
           </div>
+          <div class="op-card p-4 space-y-4">
 
-          <!-- Rotate pages -->
-          <div class="bg-white border border-parchment-dark rounded-lg p-4">
-            <div class="font-medium text-sm text-gray-700 mb-2">Rotate Pages</div>
-            <div class="flex gap-2 items-center">
-              <input id="rot-pages" type="text" placeholder="Pages (blank = all)" class="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
-              <select id="rot-degrees" class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-steel bg-white">
-                <option value="90">90 deg</option>
-                <option value="180">180 deg</option>
-                <option value="270">270 deg</option>
-              </select>
-              <button onclick="manualRotate()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Rotate</button>
+            <!-- Delete Pages -->
+            <div>
+              <div class="text-sm font-semibold mb-2" style="color:#e2e4f0;">Delete Pages</div>
+              <div class="flex gap-2 items-center">
+                <input id="del-pages" type="text" placeholder="e.g. 3,4,5 or 3-7"
+                  class="dark-input flex-1 rounded-lg px-3 py-2 text-sm" />
+                <button onclick="manualDeletePages()" class="op-btn px-4 py-2 rounded-lg text-sm font-medium">Delete</button>
+              </div>
+              <div class="text-xs mt-1.5" style="color:#3a4070;">Comma-separated numbers or a range like 3-7</div>
             </div>
-          </div>
 
-          <!-- Split / Extract -->
-          <div class="bg-white border border-parchment-dark rounded-lg p-4">
-            <div class="font-medium text-sm text-gray-700 mb-2">Extract Page Range</div>
-            <div class="flex gap-2 items-center flex-wrap">
-              <input id="split-start" type="number" min="1" placeholder="From page" class="w-24 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
-              <span class="text-gray-400 text-sm">to</span>
-              <input id="split-end" type="number" min="1" placeholder="To page" class="w-24 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
-              <input id="split-name" type="text" placeholder="Output filename" class="flex-1 min-w-32 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
-              <button onclick="manualSplit()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Extract</button>
+            <!-- Rotate Pages -->
+            <div class="border-t pt-4" style="border-color:#2E3250;">
+              <div class="text-sm font-semibold mb-2" style="color:#e2e4f0;">Rotate Pages</div>
+              <div class="flex gap-2 items-center">
+                <input id="rot-pages" type="text" placeholder="Pages (blank = all)"
+                  class="dark-input flex-1 rounded-lg px-3 py-2 text-sm" />
+                <select id="rot-degrees" class="dark-select rounded-lg px-3 py-2 text-sm w-28">
+                  <option value="90">90°</option>
+                  <option value="180">180°</option>
+                  <option value="270">270°</option>
+                </select>
+                <button onclick="manualRotate()" class="op-btn px-4 py-2 rounded-lg text-sm font-medium">Rotate</button>
+              </div>
             </div>
-            <div class="text-xs text-gray-400 mt-1">Creates a new document. The source is unchanged.</div>
-          </div>
 
-          <!-- Merge -->
-          <div class="bg-white border border-parchment-dark rounded-lg p-4">
-            <div class="font-medium text-sm text-gray-700 mb-2">Merge Documents</div>
-            <div id="merge-list" class="space-y-1.5 mb-2 text-sm text-gray-400">No files loaded yet.</div>
-            <div class="flex gap-2 items-center mt-2">
-              <input id="merge-name" type="text" placeholder="Output filename (e.g. Final.pdf)" class="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
-              <button onclick="manualMerge()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Merge All</button>
-            </div>
-            <div class="text-xs text-gray-400 mt-1">Merges all listed documents in top-to-bottom order.</div>
-          </div>
-
-          <!-- Rename -->
-          <div class="bg-white border border-parchment-dark rounded-lg p-4">
-            <div class="font-medium text-sm text-gray-700 mb-2">Rename Document</div>
-            <div class="flex gap-2 items-center">
-              <input id="rename-new" type="text" placeholder="New filename (e.g. Final-Response.pdf)" class="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
-              <button onclick="manualRename()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Rename</button>
+            <!-- Extract Range -->
+            <div class="border-t pt-4" style="border-color:#2E3250;">
+              <div class="text-sm font-semibold mb-2" style="color:#e2e4f0;">Extract Page Range</div>
+              <div class="flex gap-2 items-center flex-wrap">
+                <input id="split-start" type="number" min="1" placeholder="From"
+                  class="dark-input w-20 rounded-lg px-3 py-2 text-sm" />
+                <span class="text-xs" style="color:#4a5080;">to</span>
+                <input id="split-end" type="number" min="1" placeholder="To"
+                  class="dark-input w-20 rounded-lg px-3 py-2 text-sm" />
+                <input id="split-name" type="text" placeholder="Output filename"
+                  class="dark-input flex-1 min-w-32 rounded-lg px-3 py-2 text-sm" />
+                <button onclick="manualSplit()" class="op-btn px-4 py-2 rounded-lg text-sm font-medium">Extract</button>
+              </div>
+              <div class="text-xs mt-1.5" style="color:#3a4070;">Creates a new document. Source file is unchanged.</div>
             </div>
           </div>
-
         </div>
-      </div>
+
+        <!-- ── DOCUMENT ACTIONS CARD ── -->
+        <div>
+          <div class="text-xs font-semibold uppercase tracking-widest mb-2 flex items-center gap-2" style="color:#C9A84C88;">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="4" height="5" rx="1" stroke="#C9A84C88" stroke-width="1.2"/><rect x="7" y="2" width="4" height="5" rx="1" stroke="#C9A84C88" stroke-width="1.2"/><path d="M3 7v3M9 7v3M3 10h6" stroke="#C9A84C88" stroke-width="1" stroke-linecap="round"/></svg>
+            Document Actions
+          </div>
+          <div class="op-card p-4 space-y-4">
+
+            <!-- Merge -->
+            <div>
+              <div class="text-sm font-semibold mb-2" style="color:#e2e4f0;">Merge Documents</div>
+              <div id="merge-list" class="mb-3 rounded-lg overflow-hidden border" style="border-color:#2E3250;">
+                <div class="text-xs px-3 py-3" style="color:#3a4070;">No files loaded yet.</div>
+              </div>
+              <div class="flex gap-2 items-center">
+                <input id="merge-name" type="text" placeholder="Output filename (e.g. Final.pdf)"
+                  class="dark-input flex-1 rounded-lg px-3 py-2 text-sm" />
+                <button onclick="manualMerge()" class="op-btn px-4 py-2 rounded-lg text-sm font-medium">Merge All</button>
+              </div>
+              <div class="text-xs mt-1.5" style="color:#3a4070;">Merges all loaded documents in top-to-bottom order.</div>
+            </div>
+
+            <!-- Rename -->
+            <div class="border-t pt-4" style="border-color:#2E3250;">
+              <div class="text-sm font-semibold mb-2" style="color:#e2e4f0;">Rename Document</div>
+              <div class="flex gap-2 items-center">
+                <input id="rename-new" type="text" placeholder="New filename (e.g. Final-Response.pdf)"
+                  class="dark-input flex-1 rounded-lg px-3 py-2 text-sm" />
+                <button onclick="manualRename()" class="op-btn px-4 py-2 rounded-lg text-sm font-medium">Rename</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div><!-- /tab-manual -->
 
     </main>
   </div>
 
-  <!-- ── Status bar ── -->
-  <footer class="border-t border-parchment-dark bg-white px-5 py-1.5 flex items-center justify-between flex-shrink-0">
-    <div id="status-bar" class="text-xs text-gray-400">Ready</div>
-    <button id="undo-btn" onclick="undoLast()" class="text-xs text-steel hover:underline hidden">
-      Undo last operation
-    </button>
+  <!-- ── STATUS + LEGAL FOOTER ── -->
+  <footer class="border-t flex-shrink-0" style="background:#0e0f22;border-color:#1e2040;">
+    <div class="px-5 py-2 flex items-center justify-between">
+      <div id="status-bar" class="text-xs" style="color:#3a4070;">Ready</div>
+      <button id="undo-btn" onclick="undoLast()" class="text-xs hidden" style="color:#C9A84C;">
+        ↩ Undo last operation
+      </button>
+    </div>
+    <div class="px-5 pb-2 text-center">
+      <p class="text-xs" style="color:#2E3250;line-height:1.5;">
+        DISMD AI is a local document processing utility. It does not provide legal representation or advice. Users remain responsible for verifying document accuracy prior to judicial or state bar filing.
+      </p>
+    </div>
   </footer>
 
 </div>
 
-<!-- ── Toast notification ── -->
+<!-- ── TOAST ── -->
 <div id="toast" class="fixed bottom-6 right-6 hidden z-50">
-  <div id="toast-inner" class="px-4 py-3 rounded-lg shadow-lg text-sm text-white max-w-xs fade-in"></div>
+  <div id="toast-inner" class="px-4 py-3 rounded-xl shadow-2xl text-sm font-medium max-w-xs fade-in border" style="border-color:#2E3250;"></div>
 </div>
 
+<!-- ════════════════════════════════════════════
+     JAVASCRIPT — all existing logic preserved
+════════════════════════════════════════════ -->
 <script>
 // ──────────────────────────────────────────────────────────────────────────
 // State
 // ──────────────────────────────────────────────────────────────────────────
 let state = {
-  files: [],          // [{name, pages, size_bytes}]
-  selected: null,     // filename of selected document
-  thumbsLoaded: {},   // {filename: totalPageCount} — tracks loaded thumbs
-  lastOpFile: null,   // filename for which undo is available
+  files: [],
+  selected: null,
+  thumbsLoaded: {},
+  lastOpFile: null,
   chatBusy: false,
 };
 
@@ -385,19 +624,30 @@ function renderFileList() {
   const el = document.getElementById('file-list');
   document.getElementById('file-count').textContent = `${state.files.length} file${state.files.length !== 1 ? 's' : ''}`;
   if (!state.files.length) {
-    el.innerHTML = '<div class="text-xs text-gray-400 text-center py-4">No documents yet</div>';
+    el.innerHTML = '<div class="text-xs text-center py-5" style="color:#3a4070;">No documents yet</div>';
     return;
   }
   el.innerHTML = state.files.map(f => `
-    <div class="file-card ${f.name === state.selected ? 'selected' : ''} flex items-center justify-between px-2 py-2 rounded-md mb-1"
+    <div class="file-card ${f.name === state.selected ? 'selected' : ''} flex items-center gap-2 px-2 py-2.5 rounded-md mb-0.5"
          onclick="selectFile('${escHtml(f.name)}')">
+      <!-- Folder icon -->
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class="flex-shrink-0">
+        <path d="M1 4a1 1 0 011-1h4.5l1.5 1.5H14a1 1 0 011 1V12a1 1 0 01-1 1H2a1 1 0 01-1-1V4z"
+          fill="${f.name === state.selected ? '#C9A84C22' : '#1e2d56'}"
+          stroke="${f.name === state.selected ? '#C9A84C' : '#3a4070'}"
+          stroke-width="1"/>
+      </svg>
       <div class="min-w-0 flex-1">
-        <div class="text-xs font-medium text-gray-700 truncate" title="${escHtml(f.name)}">${escHtml(f.name)}</div>
-        <div class="text-xs text-gray-400">${f.pages} page${f.pages !== 1 ? 's' : ''} &middot; ${fmtSize(f.size_bytes)}</div>
+        <div class="text-xs font-medium truncate" style="color:${f.name === state.selected ? '#e2e4f0' : '#9098c0'};" title="${escHtml(f.name)}">${escHtml(f.name)}</div>
+        <div class="flex items-center gap-1.5 mt-0.5">
+          <span class="page-badge">${f.pages}p</span>
+          <span class="text-xs" style="color:#3a4070;">${fmtSize(f.size_bytes)}</span>
+        </div>
       </div>
       <button onclick="event.stopPropagation(); downloadFile('${escHtml(f.name)}')"
               title="Download"
-              class="ml-2 text-gray-300 hover:text-steel flex-shrink-0 text-xs">&#8595;</button>
+              class="flex-shrink-0 text-xs px-1.5 py-0.5 rounded opacity-40 hover:opacity-100 transition-opacity"
+              style="color:#C9A84C;">↓</button>
     </div>
   `).join('');
 }
@@ -405,14 +655,14 @@ function renderFileList() {
 function renderMergeList() {
   const el = document.getElementById('merge-list');
   if (!state.files.length) {
-    el.innerHTML = '<div class="text-gray-400">No files loaded yet.</div>';
+    el.innerHTML = '<div class="text-xs px-3 py-3" style="color:#3a4070;">No files loaded yet.</div>';
     return;
   }
   el.innerHTML = state.files.map((f, i) => `
-    <div class="flex items-center gap-2 py-1 border-b border-parchment-dark last:border-0">
-      <span class="text-gray-300 text-xs w-4 text-right">${i+1}.</span>
-      <span class="text-gray-700 text-xs truncate flex-1">${escHtml(f.name)}</span>
-      <span class="text-gray-400 text-xs">${f.pages}p</span>
+    <div class="merge-row flex items-center gap-2 px-3 py-2">
+      <span class="text-xs w-5 text-right flex-shrink-0" style="color:#4a5080;">${i+1}.</span>
+      <span class="text-xs truncate flex-1" style="color:#9098c0;">${escHtml(f.name)}</span>
+      <span class="page-badge">${f.pages}p</span>
     </div>
   `).join('');
 }
@@ -420,7 +670,7 @@ function renderMergeList() {
 function renderOpSelect() {
   const sel = document.getElementById('op-file-select');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">-- Select a document --</option>' +
+  sel.innerHTML = '<option value="">— Select a document —</option>' +
     state.files.map(f => `<option value="${escHtml(f.name)}" ${f.name === cur ? 'selected' : ''}>${escHtml(f.name)}</option>`).join('');
   if (!cur && state.selected) sel.value = state.selected;
 }
@@ -437,7 +687,7 @@ async function renderThumbs(filename) {
   const strip = document.getElementById('thumb-strip');
   const label = document.getElementById('thumb-file-name');
   if (!filename) {
-    strip.innerHTML = '<div class="text-xs text-gray-400 text-center py-6">Select a document to preview pages</div>';
+    strip.innerHTML = '<div class="text-xs text-center py-8" style="color:#3a4070;">Select a document to preview pages</div>';
     label.textContent = '';
     return;
   }
@@ -448,16 +698,16 @@ async function renderThumbs(filename) {
 
   for (let p = 1; p <= file.pages; p++) {
     const div = document.createElement('div');
-    div.className = 'mb-3 cursor-default';
+    div.className = 'mb-3';
     div.innerHTML = `
-      <div class="bg-parchment rounded overflow-hidden border border-gray-200 thumb">
+      <div class="rounded-lg overflow-hidden border thumb" style="border-color:#2E3250;background:#13142a;">
         <img src="/api/thumbnail/${encodeURIComponent(filename)}/${p}"
              alt="Page ${p}"
              loading="lazy"
              class="w-full object-cover"
-             onerror="this.parentElement.innerHTML='<div class=&quot;py-4 text-center text-gray-300 text-xs&quot;>Error</div>'" />
+             onerror="this.parentElement.innerHTML='<div class=&quot;py-6 text-center text-xs&quot; style=&quot;color:#3a4070;&quot;>Error</div>'" />
       </div>
-      <div class="text-center text-xs text-gray-400 mt-1">p. ${p}</div>
+      <div class="text-center text-xs mt-1" style="color:#4a5080;">p. ${p}</div>
     `;
     strip.appendChild(div);
   }
@@ -482,7 +732,9 @@ async function sendChat() {
   appendChatBubble('user', instruction);
   input.value = '';
   state.chatBusy = true;
-  document.getElementById('send-btn').disabled = true;
+  const sendBtn = document.getElementById('send-btn');
+  sendBtn.disabled = true;
+  sendBtn.classList.add('btn-loading');
   setStatus('AI is parsing your instruction...');
 
   const thinkingId = appendChatBubble('ai', '<div class="spinner"></div>', true);
@@ -501,10 +753,10 @@ async function sendChat() {
       appendChatBubble('sys', `Error: ${errMsg}`);
       toast(errMsg, 'error');
     } else {
-      let msg = `<strong class="block mb-1 text-steel text-xs uppercase tracking-wide">Done</strong>` +
-                escHtml(data.summary);
+      let msg = `<strong class="block mb-1.5 text-xs uppercase tracking-wider" style="color:#C9A84C;">Done</strong>` +
+                `<span style="color:#c0c4e0;">${escHtml(data.summary)}</span>`;
       if (data.errors && data.errors.length) {
-        msg += `<div class="mt-2 text-rose text-xs">Some actions failed:<br>${
+        msg += `<div class="mt-2 text-xs" style="color:#e74c3c;">Some actions failed:<br>${
           data.errors.map(e => `${escHtml(e.action)}: ${escHtml(e.error)}`).join('<br>')
         }</div>`;
       }
@@ -524,7 +776,8 @@ async function sendChat() {
     toast('Network error.', 'error');
   } finally {
     state.chatBusy = false;
-    document.getElementById('send-btn').disabled = false;
+    sendBtn.disabled = false;
+    sendBtn.classList.remove('btn-loading');
     setStatus('Ready');
   }
 }
@@ -532,7 +785,6 @@ async function sendChat() {
 function extractFileName(action) {
   if (!action || !action.result) return null;
   const files = state.files;
-  // Find a file mentioned in the result string
   for (const f of files) {
     if (action.result.includes(f.name)) return f.name;
   }
@@ -545,19 +797,26 @@ function appendChatBubble(role, html, raw = false, fadeIn = false) {
   const id = `bubble-${++bubbleCounter}`;
   const div = document.createElement('div');
   div.id = id;
-  div.className = `fade-in`;
+  div.className = 'fade-in';
 
   if (role === 'user') {
-    div.innerHTML = `<div class="flex justify-end"><div class="bubble-user px-4 py-2.5 text-sm max-w-lg">${raw ? html : escHtml(html)}</div></div>`;
+    div.innerHTML = `
+      <div class="flex justify-end">
+        <div class="bubble-user px-4 py-2.5 text-sm max-w-lg">${raw ? html : escHtml(html)}</div>
+      </div>`;
   } else if (role === 'sys') {
-    div.innerHTML = `<div class="bubble-sys px-3 py-2 text-gray-600 max-w-lg">${raw ? html : escHtml(html)}</div>`;
+    div.innerHTML = `
+      <div class="bubble-sys px-4 py-3 max-w-xl" style="color:#9098c0;">${raw ? html : escHtml(html)}</div>`;
   } else {
     div.innerHTML = `
-      <div class="flex gap-2 items-start">
-        <div class="w-6 h-6 rounded-full bg-steel flex-shrink-0 mt-1 flex items-center justify-center">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="0" width="7" height="9" rx="1" fill="white" fill-opacity=".6"/><rect x="2" y="1.5" width="3.5" height=".8" rx=".4" fill="white"/><rect x="2" y="3" width="3.5" height=".8" rx=".4" fill="white"/><rect x="2" y="4.5" width="2" height=".8" rx=".4" fill="white"/></svg>
+      <div class="flex gap-3 items-start">
+        <div class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5" style="background:linear-gradient(135deg,#a8862f,#C9A84C);">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1L2 3.5v4C2 10.5 4.5 13 7 13.5 9.5 13 12 10.5 12 7.5v-4L7 1z" fill="#1A1A2E" fill-opacity=".8"/>
+            <path d="M4.5 7l2 2L9.5 5" stroke="#1A1A2E" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </div>
-        <div class="bubble-ai px-4 py-2.5 text-sm text-gray-700 max-w-lg">${raw ? html : html}</div>
+        <div class="bubble-ai px-4 py-3 text-sm max-w-xl">${raw ? html : html}</div>
       </div>`;
   }
   log.appendChild(div);
@@ -579,8 +838,9 @@ function getOpFile() {
   return sel;
 }
 
-async function applyOp(action) {
-  setStatus(`Applying ${action.type.toLowerCase()}...`);
+async function applyOp(action, btn) {
+  if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
+  setStatus(`Applying ${action.type.toLowerCase().replace('_', ' ')}...`);
   try {
     const res = await fetch('/api/operate', {
       method: 'POST',
@@ -600,6 +860,8 @@ async function applyOp(action) {
   } catch (err) {
     toast('Network error.', 'error');
     setStatus('Error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
   }
 }
 
@@ -687,12 +949,8 @@ async function undoLast() {
 // ──────────────────────────────────────────────────────────────────────────
 // Download
 // ──────────────────────────────────────────────────────────────────────────
-function downloadFile(name) {
-  window.location.href = `/api/download/${encodeURIComponent(name)}`;
-}
-function downloadSelected() {
-  if (state.selected) downloadFile(state.selected);
-}
+function downloadFile(name) { window.location.href = `/api/download/${encodeURIComponent(name)}`; }
+function downloadSelected() { if (state.selected) downloadFile(state.selected); }
 function downloadAll() {
   if (!state.files.length) { toast('No files to download.', 'error'); return; }
   window.location.href = '/api/download-all';
@@ -706,17 +964,24 @@ function updateDownloadBtns() {
 // ──────────────────────────────────────────────────────────────────────────
 async function resetSession() {
   if (!confirm('Clear all uploaded documents and start a new session?')) return;
-  const res = await fetch('/api/reset', { method: 'POST' });
-  const data = await res.json();
+  await fetch('/api/reset', { method: 'POST' });
   state.selected = null;
   state.lastOpFile = null;
   state.thumbsLoaded = {};
   document.getElementById('undo-btn').classList.add('hidden');
   setFilesState([]);
   document.getElementById('chat-log').innerHTML = `
-    <div class="bubble-ai p-3 max-w-lg text-sm text-gray-700 fade-in">
-      <span class="font-medium text-steel block mb-1 text-xs uppercase tracking-wide">PDF Assistant</span>
-      Session cleared. Upload your documents to begin.
+    <div class="flex gap-3 items-start fade-in">
+      <div class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5" style="background:linear-gradient(135deg,#a8862f,#C9A84C);">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M7 1L2 3.5v4C2 10.5 4.5 13 7 13.5 9.5 13 12 10.5 12 7.5v-4L7 1z" fill="#1A1A2E" fill-opacity=".8"/>
+          <path d="M4.5 7l2 2L9.5 5" stroke="#1A1A2E" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="bubble-ai px-4 py-3 text-sm max-w-xl">
+        <span class="block text-xs font-semibold uppercase tracking-wider mb-1" style="color:#C9A84C;">DISMD AI Assistant</span>
+        <span style="color:#c0c4e0;">Session cleared. Upload your documents to begin a new secure session.</span>
+      </div>
     </div>`;
   renderThumbs(null);
   toast('Session cleared.', 'success');
@@ -740,8 +1005,15 @@ let toastTimer;
 function toast(msg, type = 'info') {
   const el = document.getElementById('toast');
   const inner = document.getElementById('toast-inner');
-  const colors = { success: '#1a7f4b', error: '#c0392b', info: '#2b5797' };
-  inner.style.background = colors[type] || colors.info;
+  const styles = {
+    success: { bg: '#0d2e1a', border: '#2ecc7155', color: '#2ecc71' },
+    error:   { bg: '#2e0d0d', border: '#e74c3c55', color: '#e74c3c' },
+    info:    { bg: '#13142a', border: '#C9A84C55', color: '#C9A84C' },
+  };
+  const s = styles[type] || styles.info;
+  inner.style.background = s.bg;
+  inner.style.borderColor = s.border;
+  inner.style.color = s.color;
   inner.textContent = msg;
   el.classList.remove('hidden');
   clearTimeout(toastTimer);
