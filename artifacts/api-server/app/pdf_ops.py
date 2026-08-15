@@ -310,16 +310,122 @@ def redact_pdf(session_dir: Path, filename: str, terms: list[str]) -> tuple[str,
     return output_name, total_hits
 
 
+def check_has_text(session_dir: Path, filename: str) -> bool:
+    """
+    Return True if the PDF appears to already contain an extractable text layer.
+    Checks the first few pages to avoid scanning the whole document.
+    """
+    path = _validate_file(session_dir, filename)
+    doc = fitz.open(str(path))
+    found = False
+    for i in range(min(3, doc.page_count)):
+        if doc[i].get_text("text").strip():
+            found = True
+            break
+    doc.close()
+    return found
+
+
+def ocr_pdf(
+    session_dir: Path,
+    filename: str,
+    progress_callback=None,  # callable(current_page: int, total_pages: int) | None
+) -> str:
+    """
+    Run Tesseract OCR on every page of the PDF and produce a new searchable PDF.
+
+    Each page is rendered at 300 DPI to a PIL Image, passed to pytesseract
+    (which returns a single-page searchable PDF with an invisible text layer),
+    then all pages are stitched together with PyMuPDF.
+
+    Creates a NEW file <stem>-ocr.pdf — source is NEVER modified.
+    Returns the output filename.
+    """
+    import io as _io
+    from PIL import Image
+    import pytesseract
+    from .session_mgr import sanitize_filename
+
+    src_path = _validate_file(session_dir, filename)
+    stem = Path(filename).stem
+
+    # Collision-safe output name
+    output_name = sanitize_filename(f"{stem}-ocr.pdf")
+    counter = 1
+    while (session_dir / output_name).exists():
+        output_name = sanitize_filename(f"{stem}-ocr_{counter}.pdf")
+        counter += 1
+
+    src = fitz.open(str(src_path))
+    total = src.page_count
+
+    output_doc = fitz.open()
+
+    for i in range(total):
+        if progress_callback:
+            progress_callback(i + 1, total)
+
+        page = src[i]
+        # 300 DPI for solid OCR quality (72 is PDF native, so scale = 300/72 ≈ 4.17)
+        mat = fitz.Matrix(300 / 72, 300 / 72)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+
+        # Pixmap → PIL Image
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+
+        # PIL Image → single-page searchable PDF bytes (invisible text layer over image)
+        pdf_bytes = pytesseract.image_to_pdf_or_hocr(img, extension="pdf")
+
+        # Merge the single-page OCR PDF into our output document
+        ocr_page_doc = fitz.open("pdf", _io.BytesIO(pdf_bytes))
+        output_doc.insert_pdf(ocr_page_doc)
+        ocr_page_doc.close()
+
+    src.close()
+
+    out_path = session_dir / output_name
+    output_doc.save(str(out_path), garbage=4, deflate=True)
+    output_doc.close()
+    _invalidate_thumb_cache(session_dir, output_name)
+
+    # Write an undo-by-deletion marker so undo_last_op can remove this file.
+    # OCR never modifies the source, so "undo" means deleting what was just created.
+    (session_dir / (Path(output_name).stem + ".undo_delete")).write_bytes(b"")
+
+    return output_name
+
+
 def undo_last_op(session_dir: Path, filename: str) -> bool:
     """
-    Restore a file from its .bak version.
-    Returns True if a backup existed and was restored.
+    Undo the last operation on a file.  Two modes:
+
+    1. Restore-from-backup (mutating ops like delete/rotate/redact-in-place):
+       Copies <stem>_bak.pdf back over the file and removes the backup.
+
+    2. Undo-by-deletion (creating ops like OCR that produce a new file):
+       If a <stem>.undo_delete marker exists, delete the generated file
+       and the marker.  This is the correct undo for operations that never
+       modify the original — "remove what was just created."
+
+    Returns True if either undo succeeded.
     """
     path = _validate_file(session_dir, filename)
     bak = session_dir / (Path(filename).stem + "_bak.pdf")
-    if not bak.exists():
-        return False
-    shutil.copy2(str(bak), str(path))
-    bak.unlink(missing_ok=True)
-    _invalidate_thumb_cache(session_dir, filename)
-    return True
+    delete_marker = session_dir / (Path(filename).stem + ".undo_delete")
+
+    if bak.exists():
+        # Standard restore-from-backup path
+        shutil.copy2(str(bak), str(path))
+        bak.unlink(missing_ok=True)
+        delete_marker.unlink(missing_ok=True)  # safety clean-up
+        _invalidate_thumb_cache(session_dir, filename)
+        return True
+
+    if delete_marker.exists():
+        # Undo by deleting the newly created file
+        delete_marker.unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
+        _invalidate_thumb_cache(session_dir, filename)
+        return True
+
+    return False

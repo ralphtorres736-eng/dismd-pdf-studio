@@ -22,8 +22,8 @@ from .session_mgr import (
     sanitize_filename, cleanup_expired_sessions,
 )
 from .pdf_ops import (
-    delete_pages, get_all_page_counts, get_page_count,
-    get_thumbnail, highlight_page, merge_pdfs, redact_pdf,
+    check_has_text, delete_pages, get_all_page_counts, get_page_count,
+    get_thumbnail, highlight_page, merge_pdfs, ocr_pdf, redact_pdf,
     reorder_pages, rotate_pages, split_pdf, undo_last_op,
 )
 from .ai_parser import parse_instruction
@@ -31,6 +31,9 @@ from .ai_parser import parse_instruction
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB per file
+
+# In-memory OCR job tracker: {job_id: {status, current_page, total_pages, output, error, session_dir}}
+_ocr_jobs: dict[str, dict] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +306,83 @@ async def download_all(request: Request):
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=pdf_documents.zip"},
     )
+
+
+# ---------------------------------------------------------------------------
+# OCR — background job with progress polling
+# ---------------------------------------------------------------------------
+
+@app.post("/api/ocr/{filename}")
+async def start_ocr(request: Request, filename: str):
+    """
+    Start an OCR job for the given file. Returns immediately with a job_id.
+    Poll /api/ocr-status/{job_id} for progress.
+    """
+    session_dir = _session_dir(request)
+
+    # Validate file exists before spawning the job
+    from .pdf_ops import _validate_file
+    try:
+        _validate_file(session_dir, filename)
+    except FileNotFoundError:
+        raise HTTPException(404, f"File '{filename}' not found.")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    has_text = await asyncio.to_thread(check_has_text, session_dir, filename)
+    total_pages = await asyncio.to_thread(
+        lambda: __import__('fitz').open(str(session_dir / filename)).page_count
+    )
+
+    job_id = str(uuid.uuid4())
+    _ocr_jobs[job_id] = {
+        "status": "running",
+        "current_page": 0,
+        "total_pages": total_pages,
+        "output": None,
+        "error": None,
+        "session_dir": session_dir,
+    }
+
+    def _progress(current: int, total: int):
+        if job_id in _ocr_jobs:
+            _ocr_jobs[job_id]["current_page"] = current
+
+    async def _run_ocr():
+        try:
+            result = await asyncio.to_thread(ocr_pdf, session_dir, filename, _progress)
+            if job_id in _ocr_jobs:
+                _ocr_jobs[job_id].update({"status": "done", "output": result, "current_page": total_pages})
+        except Exception as exc:
+            if job_id in _ocr_jobs:
+                _ocr_jobs[job_id].update({"status": "error", "error": str(exc)})
+
+    asyncio.create_task(_run_ocr())
+
+    return JSONResponse({
+        "job_id": job_id,
+        "has_text": has_text,
+        "total_pages": total_pages,
+    })
+
+
+@app.get("/api/ocr-status/{job_id}")
+async def ocr_status(request: Request, job_id: str):
+    """Return the current progress of an OCR job."""
+    job = _ocr_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "OCR job not found.")
+
+    response: dict = {
+        "status": job["status"],
+        "current_page": job["current_page"],
+        "total_pages": job["total_pages"],
+        "output": job["output"],
+        "error": job["error"],
+    }
+    if job["status"] == "done":
+        response["files"] = _file_metadata(job["session_dir"])
+    return JSONResponse(response)
 
 
 # ---------------------------------------------------------------------------

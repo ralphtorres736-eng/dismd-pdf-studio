@@ -498,6 +498,42 @@
               </div>
             </div>
 
+            <!-- OCR -->
+            <div class="border-t pt-4" style="border-color:#2E3250;">
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-sm font-semibold" style="color:#e2e4f0;">OCR — Make Searchable</div>
+                <span class="text-xs px-2 py-0.5 rounded" style="background:#C9A84C18;color:#C9A84C;border:1px solid #C9A84C33;">New file</span>
+              </div>
+
+              <!-- Existing text warning (shown after check) -->
+              <div id="ocr-text-warning" class="hidden flex items-start gap-2 mb-3 px-3 py-2 rounded-lg" style="background:#C9A84C14;border:1px solid #C9A84C44;">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="flex-shrink-0 mt-0.5">
+                  <path d="M6.5 1L1 12h11L6.5 1z" stroke="#C9A84C" stroke-width="1.2" stroke-linejoin="round"/>
+                  <path d="M6.5 5v3" stroke="#C9A84C" stroke-width="1.2" stroke-linecap="round"/>
+                  <circle cx="6.5" cy="9.8" r=".6" fill="#C9A84C"/>
+                </svg>
+                <span class="text-xs leading-relaxed" style="color:#C9A84Ccc;">
+                  This document appears to already contain text. OCR may produce duplicate layers in the output.
+                </span>
+              </div>
+
+              <!-- Progress bar (hidden until job starts) -->
+              <div id="ocr-progress-wrap" class="hidden mb-3">
+                <div class="flex justify-between text-xs mb-1.5" style="color:#7a80a8;">
+                  <span id="ocr-progress-label">Starting OCR…</span>
+                  <span id="ocr-progress-pct">0%</span>
+                </div>
+                <div class="w-full rounded-full overflow-hidden" style="background:#2E3250;height:5px;">
+                  <div id="ocr-progress-bar" class="h-full rounded-full" style="background:#C9A84C;width:0%;transition:width 0.6s ease;"></div>
+                </div>
+              </div>
+
+              <button onclick="manualOcr(this)" id="ocr-btn" class="w-full py-2 rounded-lg text-sm font-medium op-btn">
+                ◎ Run OCR
+              </button>
+              <div class="text-xs mt-1.5" style="color:#3a4070;">Creates a new <code style="font-size:0.7rem;">-ocr.pdf</code> with searchable text. Original preserved. Undoable.</div>
+            </div>
+
           </div>
         </div>
 
@@ -1002,6 +1038,96 @@ async function manualRedact(btn) {
     setStatus('Error');
   } finally {
     if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+  }
+}
+
+async function manualOcr(btn) {
+  const file = getOpFile(); if (!file) return;
+
+  if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
+  setStatus(`Starting OCR on ${file}…`);
+
+  const progressWrap  = document.getElementById('ocr-progress-wrap');
+  const progressBar   = document.getElementById('ocr-progress-bar');
+  const progressLabel = document.getElementById('ocr-progress-label');
+  const progressPct   = document.getElementById('ocr-progress-pct');
+  const textWarning   = document.getElementById('ocr-text-warning');
+
+  // Reset UI state
+  textWarning.classList.add('hidden');
+  progressBar.style.width = '0%';
+  progressLabel.textContent = 'Starting OCR…';
+  progressPct.textContent = '0%';
+  progressWrap.classList.remove('hidden');
+
+  let pollInterval = null;
+
+  try {
+    const res = await fetch(`/api/ocr/${encodeURIComponent(file)}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.detail || 'OCR failed to start.', 'error');
+      setStatus('Error');
+      progressWrap.classList.add('hidden');
+      return;
+    }
+
+    // Show warning if text layer already exists (non-blocking — OCR proceeds)
+    if (data.has_text) {
+      textWarning.classList.remove('hidden');
+    }
+
+    const jobId    = data.job_id;
+    const total    = data.total_pages || 1;
+
+    await new Promise((resolve, reject) => {
+      pollInterval = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/ocr-status/${encodeURIComponent(jobId)}`);
+          const s  = await sr.json();
+
+          const current = s.current_page || 0;
+          const pct = Math.round((current / total) * 100);
+          progressBar.style.width = pct + '%';
+          progressLabel.textContent = current > 0
+            ? `Running OCR on page ${current} of ${total}…`
+            : 'Starting OCR…';
+          progressPct.textContent = pct + '%';
+          setStatus(`OCR: page ${current} / ${total}`);
+
+          if (s.status === 'done') {
+            clearInterval(pollInterval);
+            progressBar.style.width = '100%';
+            progressLabel.textContent = 'OCR complete!';
+            progressPct.textContent = '100%';
+            if (s.files) setFilesState(s.files);
+            enableUndo(s.output);
+            toast(`OCR complete → ${s.output}`, 'success');
+            setStatus('Ready');
+            resolve();
+          } else if (s.status === 'error') {
+            clearInterval(pollInterval);
+            toast('OCR failed: ' + (s.error || 'Unknown error'), 'error');
+            setStatus('Error');
+            reject(new Error(s.error));
+          }
+        } catch (pollErr) {
+          clearInterval(pollInterval);
+          reject(pollErr);
+        }
+      }, 1500);
+    });
+
+  } catch (err) {
+    toast('OCR error: ' + err.message, 'error');
+    setStatus('Error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+    // Keep progress visible for 3 s then hide
+    setTimeout(() => {
+      progressWrap.classList.add('hidden');
+      textWarning.classList.add('hidden');
+    }, 3000);
   }
 }
 
