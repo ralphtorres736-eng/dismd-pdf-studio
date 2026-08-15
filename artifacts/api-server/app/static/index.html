@@ -220,6 +220,36 @@
       border-radius: inherit;
       background: rgba(0,0,0,0.3);
     }
+
+    /* ── Drag-and-drop thumbnail reorder ── */
+    .thumb-item {
+      cursor: grab;
+      position: relative;
+      border-radius: 8px;
+      outline: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .thumb-item:focus-visible { box-shadow: 0 0 0 2px #C9A84C88; }
+    .thumb-item:active { cursor: grabbing; }
+    .thumb-item.is-dragging { opacity: 0.35; }
+    /* Drop-indicator lines appear between items, not inside them */
+    .thumb-item.drop-above::before,
+    .thumb-item.drop-below::after {
+      content: '';
+      position: absolute;
+      left: 4px; right: 4px;
+      height: 3px;
+      background: #C9A84C;
+      border-radius: 2px;
+      z-index: 20;
+      pointer-events: none;
+    }
+    .thumb-item.drop-above::before { top: -4px; }
+    .thumb-item.drop-below::after  { bottom: -4px; }
+    /* Drag handle dot-grid */
+    .drag-handle { position: absolute; top: 5px; right: 5px; z-index: 10; opacity: 0.35; transition: opacity 0.15s; pointer-events: none; color: #C9A84C; }
+    .thumb-item:hover .drag-handle { opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -318,6 +348,19 @@
       </div>
       <div id="thumb-strip" class="flex-1 overflow-y-auto px-2 pb-3">
         <div class="text-xs text-center py-8" style="color:#3a4070;">Select a document to preview pages</div>
+      </div>
+
+      <!-- REORDER BAR — appears when pages have been rearranged but not yet committed -->
+      <div id="reorder-bar" class="hidden flex-shrink-0 px-3 py-2.5 border-t" style="border-color:#C9A84C33;background:#111828;">
+        <div class="text-xs text-center mb-2" style="color:#C9A84C88;">⇅ Pages rearranged — commit or discard</div>
+        <div class="flex gap-2">
+          <button id="reorder-apply-btn" onclick="applyReorder()" class="flex-1 text-xs py-2 rounded-lg btn-gold font-semibold">
+            ✓ Apply Order
+          </button>
+          <button onclick="resetReorder()" class="text-xs py-2 px-4 rounded-lg btn-ghost">
+            Reset
+          </button>
+        </div>
       </div>
 
       <!-- DOWNLOAD ACTIONS -->
@@ -622,7 +665,12 @@ let state = {
   thumbsLoaded: {},
   lastOpFile: null,
   chatBusy: false,
+  pendingOrder: null,     // null = original order; array = pending drag reorder
+  thumbCacheBust: 0,      // timestamp appended to thumbnail URLs after a server-side op
 };
+
+// Drag-and-drop state (not persisted in state — ephemeral per-drag)
+let _dnd = { dragIdx: -1 };
 
 // ──────────────────────────────────────────────────────────────────────────
 // Boot
@@ -764,34 +812,212 @@ function selectFile(name) {
   renderThumbs(name);
 }
 
-async function renderThumbs(filename) {
+// cacheBust: pass Date.now() after a server-side op to force fresh thumbnails
+async function renderThumbs(filename, cacheBust = 0) {
   const strip = document.getElementById('thumb-strip');
   const label = document.getElementById('thumb-file-name');
   if (!filename) {
     strip.innerHTML = '<div class="text-xs text-center py-8" style="color:#3a4070;">Select a document to preview pages</div>';
     label.textContent = '';
+    state.pendingOrder = null;
+    state.thumbCacheBust = 0;
+    _updateReorderBar();
     return;
   }
   const file = state.files.find(f => f.name === filename);
   if (!file) return;
   label.textContent = filename;
+  state.thumbCacheBust = cacheBust;
+  // Reset to original sequential order for this file
+  state.pendingOrder = Array.from({ length: file.pages }, (_, i) => i + 1);
+  _renderThumbsFromPending();
+  _updateReorderBar();
+}
+
+// Render the thumb strip from the current pendingOrder array.
+// Called both by renderThumbs (initial) and after every drag/keyboard move.
+function _renderThumbsFromPending() {
+  const filename = state.selected;
+  if (!filename || !state.pendingOrder) return;
+  const strip = document.getElementById('thumb-strip');
+  const cb = state.thumbCacheBust ? `?t=${state.thumbCacheBust}` : '';
   strip.innerHTML = '';
 
-  for (let p = 1; p <= file.pages; p++) {
+  state.pendingOrder.forEach((origPage, newPos) => {
     const div = document.createElement('div');
-    div.className = 'mb-3';
+    div.className = 'thumb-item mb-2';
+    div.setAttribute('draggable', 'true');
+    div.setAttribute('tabindex', '0');
+    div.setAttribute('role', 'option');
+    div.setAttribute('aria-label', `Page ${newPos + 1}${origPage !== newPos + 1 ? ' (originally page ' + origPage + ')' : ''}`);
+    div.setAttribute('aria-grabbed', 'false');
+    div.dataset.idx = String(newPos);
+
+    // Bind drag events
+    div.addEventListener('dragstart',  e => _thumbDragStart(e, newPos));
+    div.addEventListener('dragover',   e => _thumbDragOver(e, newPos));
+    div.addEventListener('dragleave',  _thumbDragLeave);
+    div.addEventListener('drop',       e => _thumbDrop(e, newPos));
+    div.addEventListener('dragend',    _thumbDragEnd);
+    div.addEventListener('keydown',    e => _thumbKeydown(e, newPos));
+
     div.innerHTML = `
-      <div class="rounded-lg overflow-hidden border thumb" style="border-color:#2E3250;background:#13142a;">
-        <img src="/api/thumbnail/${encodeURIComponent(filename)}/${p}"
-             alt="Page ${p}"
+      <div class="rounded-lg overflow-hidden border thumb" style="border-color:#2E3250;background:#13142a;position:relative;">
+        <span class="drag-handle" title="Drag to reorder" aria-hidden="true">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+            <circle cx="3" cy="2.5" r="1.1" fill="currentColor"/>
+            <circle cx="8" cy="2.5" r="1.1" fill="currentColor"/>
+            <circle cx="3" cy="5.5" r="1.1" fill="currentColor"/>
+            <circle cx="8" cy="5.5" r="1.1" fill="currentColor"/>
+            <circle cx="3" cy="8.5" r="1.1" fill="currentColor"/>
+            <circle cx="8" cy="8.5" r="1.1" fill="currentColor"/>
+          </svg>
+        </span>
+        <img src="/api/thumbnail/${encodeURIComponent(filename)}/${origPage}${cb}"
+             alt="Page ${newPos + 1}"
              loading="lazy"
              class="w-full object-cover"
-             onerror="this.parentElement.innerHTML='<div class=&quot;py-6 text-center text-xs&quot; style=&quot;color:#3a4070;&quot;>Error</div>'" />
+             onerror="this.parentElement.innerHTML='<div class=\\'py-6 text-center text-xs\\' style=\\'color:#3a4070;\\'>!</div>'" />
       </div>
-      <div class="text-center text-xs mt-1" style="color:#4a5080;">p. ${p}</div>
+      <div class="thumb-page-label text-center text-xs mt-1 font-medium" style="color:#4a5080;">p.&thinsp;${newPos + 1}</div>
     `;
     strip.appendChild(div);
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Drag-and-drop handlers
+// ──────────────────────────────────────────────────────────────────────────
+
+function _thumbDragStart(e, idx) {
+  _dnd.dragIdx = idx;
+  e.currentTarget.classList.add('is-dragging');
+  e.currentTarget.setAttribute('aria-grabbed', 'true');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', String(idx));
+}
+
+function _thumbDragOver(e, idx) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  if (idx === _dnd.dragIdx) return;
+  // Clear all indicators
+  document.querySelectorAll('.thumb-item').forEach(el => el.classList.remove('drop-above', 'drop-below'));
+  // Show indicator above or below based on cursor position in item
+  const rect = e.currentTarget.getBoundingClientRect();
+  if (e.clientY < rect.top + rect.height / 2) {
+    e.currentTarget.classList.add('drop-above');
+  } else {
+    e.currentTarget.classList.add('drop-below');
   }
+}
+
+function _thumbDragLeave(e) {
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    e.currentTarget.classList.remove('drop-above', 'drop-below');
+  }
+}
+
+function _thumbDrop(e, idx) {
+  e.preventDefault();
+  // Clean up all visual indicators
+  document.querySelectorAll('.thumb-item').forEach(el => el.classList.remove('drop-above', 'drop-below', 'is-dragging'));
+
+  const from = _dnd.dragIdx;
+  _dnd.dragIdx = -1;
+  if (from < 0 || from === idx) return;
+
+  // Determine insertion position (above or below midpoint)
+  const rect = e.currentTarget.getBoundingClientRect();
+  const insertBefore = e.clientY < (rect.top + rect.height / 2);
+  let to = insertBefore ? idx : idx + 1;
+  // Adjust insert index for the removal of `from`
+  if (to > from) to--;
+
+  const order = [...state.pendingOrder];
+  const [moved] = order.splice(from, 1);
+  order.splice(to, 0, moved);
+  state.pendingOrder = order;
+  _renderThumbsFromPending();
+  _updateReorderBar();
+}
+
+function _thumbDragEnd(e) {
+  e.currentTarget.classList.remove('is-dragging');
+  e.currentTarget.setAttribute('aria-grabbed', 'false');
+  document.querySelectorAll('.thumb-item').forEach(el => el.classList.remove('drop-above', 'drop-below'));
+  _dnd.dragIdx = -1;
+}
+
+// Keyboard: Alt+Up / Alt+Down moves the focused thumb one position
+function _thumbKeydown(e, idx) {
+  if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  const dir = e.key === 'ArrowUp' ? -1 : 1;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= state.pendingOrder.length) return;
+
+  const order = [...state.pendingOrder];
+  [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
+  state.pendingOrder = order;
+  _renderThumbsFromPending();
+  _updateReorderBar();
+
+  // Re-focus the moved item after re-render
+  requestAnimationFrame(() => {
+    const items = document.querySelectorAll('.thumb-item');
+    if (items[newIdx]) items[newIdx].focus();
+  });
+}
+
+// Show/hide the apply/reset bar based on whether order has changed
+function _updateReorderBar() {
+  const bar = document.getElementById('reorder-bar');
+  if (!state.pendingOrder) { bar.classList.add('hidden'); return; }
+  const dirty = state.pendingOrder.some((p, i) => p !== i + 1);
+  bar.classList.toggle('hidden', !dirty);
+}
+
+async function applyReorder() {
+  const file = state.selected;
+  if (!file || !state.pendingOrder) return;
+  const dirty = state.pendingOrder.some((p, i) => p !== i + 1);
+  if (!dirty) return;
+
+  const applyBtn = document.getElementById('reorder-apply-btn');
+  if (applyBtn) { applyBtn.disabled = true; applyBtn.classList.add('btn-loading'); }
+  setStatus(`Reordering pages of ${file}…`);
+
+  try {
+    const res = await fetch('/api/operate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: { type: 'REORDER', file, new_order: state.pendingOrder } }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.detail || 'Reorder failed.', 'error');
+      setStatus('Error');
+    } else {
+      setFilesState(data.files || []);
+      enableUndo(file);
+      toast(`Pages reordered in ${file}`, 'success');
+      setStatus('Ready');
+      // Reset pendingOrder to the new sequential [1..n] and reload thumbnails
+      // with a cache-bust timestamp so the browser fetches fresh renders
+      // (the server invalidated its thumbnail cache on save).
+      await renderThumbs(file, Date.now());
+    }
+  } catch (err) {
+    toast('Reorder error: ' + err.message, 'error');
+    setStatus('Error');
+  } finally {
+    if (applyBtn) { applyBtn.disabled = false; applyBtn.classList.remove('btn-loading'); }
+  }
+}
+
+function resetReorder() {
+  if (state.selected) renderThumbs(state.selected);
 }
 
 // ──────────────────────────────────────────────────────────────────────────

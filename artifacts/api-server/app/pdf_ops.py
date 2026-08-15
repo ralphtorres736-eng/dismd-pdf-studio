@@ -206,19 +206,29 @@ def reorder_pages(session_dir: Path, filename: str, new_order: list[int]) -> str
     Modifies in-place with backup.
     """
     path = _validate_file(session_dir, filename)
+
+    # Validate before touching the backup — a failed validation must not
+    # overwrite the existing backup with a bad or partially-processed state.
+    doc = fitz.open(str(path))
+    total = doc.page_count
+    zero_based = [p - 1 for p in new_order]
+    if sorted(zero_based) != list(range(total)):
+        doc.close()
+        raise ValueError(
+            f"new_order must be a valid permutation of all {total} page numbers "
+            f"(1–{total}) with no duplicates or out-of-range values."
+        )
+
     _backup(path)
     _invalidate_thumb_cache(session_dir, filename)
 
-    doc = fitz.open(str(path))
-    total = doc.page_count
-    zero_based = [p - 1 for p in new_order if 1 <= p <= total]
-    if len(zero_based) != total:
-        doc.close()
-        raise ValueError(f"new_order must contain all {total} page numbers exactly once.")
-
     doc.select(zero_based)
-    doc.save(str(path), incremental=False, garbage=4, deflate=True)
+    # Save to a temp file then replace — direct in-place save raises
+    # "save to original must be incremental" after doc.select() in PyMuPDF ≥1.24.
+    tmp_path = path.parent / (path.stem + "_reorder_tmp.pdf")
+    doc.save(str(tmp_path), garbage=4, deflate=True)
     doc.close()
+    shutil.move(str(tmp_path), str(path))
     return filename
 
 
