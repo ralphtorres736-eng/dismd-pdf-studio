@@ -1,13 +1,13 @@
 kind = "api"
-previewPath = "/"
-title = "DISMD AI — Secure PDF Studio"
+previewPath = "/api-backend"
+title = "DISMD AI — Backend (internal)"
 version = "1.0.0"
 id = "3B4_FFSkEVBkAeYMFRJ2e"
 
 [[services]]
 localPort = 8080
 name = "API Server"
-paths = ["/"]
+paths = []
 
 [services.development]
 run = "bash /home/runner/workspace/artifacts/api-server/start.sh"

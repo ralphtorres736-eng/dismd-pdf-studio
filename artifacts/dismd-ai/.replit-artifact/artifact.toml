@@ -1,0 +1,22 @@
+kind = "web"
+previewPath = "/"
+title = "DISMD AI — Secure PDF Studio"
+description = "Privacy-first, legal-grade PDF editing web app for attorneys. All PDF processing runs server-side via PyMuPDF. Supports redaction, OCR, page reordering, and merge/split — the AI assistant never receives document text, only file names and page counts."
+version = "1.0.0"
+id = "artifacts/dismd-ai"
+router = "path"
+
+[[services]]
+name = "web"
+paths = ["/"]
+localPort = 22861
+
+[services.development]
+run = "bash /home/runner/workspace/artifacts/api-server/start.sh"
+
+[services.production]
+run = "bash /home/runner/workspace/artifacts/api-server/start.sh"
+
+[services.env]
+PORT = "22861"
+BASE_PATH = "/"
