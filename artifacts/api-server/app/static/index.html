@@ -501,6 +501,51 @@
           </div>
         </div>
 
+        <!-- ── REDACTION CARD ── -->
+        <div>
+          <div class="text-xs font-semibold uppercase tracking-widest mb-2 flex items-center gap-2" style="color:#e74c3c99;">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="2" fill="#e74c3c22" stroke="#e74c3c99" stroke-width="1.2"/><path d="M3 6h6" stroke="#e74c3c99" stroke-width="2" stroke-linecap="round"/></svg>
+            Redaction
+          </div>
+          <div class="op-card p-4" style="border-color:#e74c3c33;">
+
+            <!-- Irreversibility warning -->
+            <div class="flex items-start gap-2 mb-4 px-3 py-2.5 rounded-lg" style="background:#e74c3c14;border:1px solid #e74c3c44;">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" class="flex-shrink-0 mt-0.5">
+                <path d="M7 1L1 13h12L7 1z" stroke="#e74c3c" stroke-width="1.2" stroke-linejoin="round"/>
+                <path d="M7 5.5v3" stroke="#e74c3c" stroke-width="1.3" stroke-linecap="round"/>
+                <circle cx="7" cy="10.5" r=".7" fill="#e74c3c"/>
+              </svg>
+              <span class="text-xs leading-relaxed" style="color:#e74c3ccc;">
+                <strong style="color:#e74c3c;">Redacted content is permanently removed.</strong>
+                This action cannot be undone. A new <code style="font-size:0.7rem;background:#e74c3c22;padding:1px 4px;border-radius:3px;">-redacted.pdf</code> file will be created — your original document is preserved.
+              </span>
+            </div>
+
+            <div class="mb-3">
+              <label class="block text-xs font-semibold mb-1.5" style="color:#9098c0;">Search Terms <span style="color:#4a5080;font-weight:400;">(one per line)</span></label>
+              <textarea
+                id="redact-terms"
+                rows="4"
+                class="dark-input w-full rounded-lg px-3 py-2 text-sm resize-none"
+                placeholder="John Smith&#10;123-45-6789&#10;Acme Corporation"
+              ></textarea>
+              <div class="text-xs mt-1.5" style="color:#3a4070;">Each line is treated as a separate search string. Case-sensitive. Plain text only.</div>
+            </div>
+
+            <button
+              onclick="manualRedact(this)"
+              class="w-full py-2.5 rounded-lg text-sm font-semibold transition"
+              style="background:#e74c3c18;border:1px solid #e74c3c66;color:#e74c3c;transition:background 0.15s,border-color 0.15s,box-shadow 0.15s;"
+              onmouseover="this.style.background='#e74c3c28';this.style.borderColor='#e74c3c';this.style.boxShadow='0 0 0 1px #e74c3c44';"
+              onmouseout="this.style.background='#e74c3c18';this.style.borderColor='#e74c3c66';this.style.boxShadow='';"
+            >
+              ⬛ Redact Document
+            </button>
+
+          </div>
+        </div>
+
       </div><!-- /tab-manual -->
 
     </main>
@@ -764,8 +809,11 @@ async function sendChat() {
       setFilesState(data.files || []);
       if (data.actions_executed.length) {
         const lastAction = data.actions_executed[data.actions_executed.length - 1];
-        const fileForUndo = extractFileName(lastAction);
-        if (fileForUndo) enableUndo(fileForUndo);
+        // REDACT is irreversible — never enable undo for redaction actions
+        if (lastAction.action !== 'REDACT') {
+          const fileForUndo = extractFileName(lastAction);
+          if (fileForUndo) enableUndo(fileForUndo);
+        }
       }
       setStatus('Ready');
       toast('Operations completed.', 'success');
@@ -918,6 +966,43 @@ function manualRename() {
   const newName = document.getElementById('rename-new').value.trim();
   if (!newName) { toast('Enter a new filename.', 'error'); return; }
   applyOp({ type: 'RENAME', file, new_name: newName });
+}
+
+async function manualRedact(btn) {
+  const file = getOpFile(); if (!file) return;
+  const raw = document.getElementById('redact-terms').value;
+  const terms = raw.split('\n').map(t => t.trim()).filter(Boolean);
+  if (!terms.length) { toast('Enter at least one search term.', 'error'); return; }
+
+  const termList = terms.map(t => `"${t}"`).join(', ');
+  if (!confirm(`Permanently redact ${terms.length} term(s) — ${termList} — from "${file}"?\n\nThis will create a new "-redacted.pdf" file. Redacted content cannot be recovered.`)) return;
+
+  // Redaction is irreversible — do NOT call applyOp (which enables undo)
+  if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
+  setStatus(`Redacting ${terms.length} term(s) from ${file}...`);
+  try {
+    const res = await fetch('/api/operate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: { type: 'REDACT', file, terms } }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.detail || 'Redaction failed.', 'error');
+      setStatus('Error');
+    } else {
+      setFilesState(data.files || []);
+      toast(data.result, 'success');
+      document.getElementById('redact-terms').value = '';
+      setStatus('Ready');
+      // Undo intentionally NOT enabled for redaction (irreversible)
+    }
+  } catch (err) {
+    toast('Network error.', 'error');
+    setStatus('Error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

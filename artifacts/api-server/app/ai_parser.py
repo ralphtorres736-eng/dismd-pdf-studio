@@ -20,7 +20,7 @@ from openai import OpenAI
 
 ALLOWED_ACTION_TYPES = {
     "MERGE", "DELETE_PAGES", "SPLIT", "ROTATE", "REORDER",
-    "HIGHLIGHT", "RENAME"
+    "HIGHLIGHT", "RENAME", "REDACT"
 }
 
 SYSTEM_PROMPT = """You are a PDF structural command parser for a legal document management tool.
@@ -60,7 +60,12 @@ OUTPUT SCHEMA (always return exactly this structure):
     {"type": "HIGHLIGHT", "file": "A.pdf", "page": 3, "rect": [50, 50, 500, 80], "color": [1, 0.9, 0], "label": "Note"},
     
     // RENAME: rename a file within the session
-    {"type": "RENAME", "file": "old.pdf", "new_name": "new.pdf"}
+    {"type": "RENAME", "file": "old.pdf", "new_name": "new.pdf"},
+
+    // REDACT: permanently black out all occurrences of each term.
+    // terms come ONLY from the user's instruction — never from document content.
+    // Output is saved as <original>-redacted.pdf. This action is irreversible.
+    {"type": "REDACT", "file": "A.pdf", "terms": ["John Smith", "123-45-6789"]}
   ],
   "summary": "Plain-English description of what will be done."
 }"""

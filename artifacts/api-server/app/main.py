@@ -23,8 +23,8 @@ from .session_mgr import (
 )
 from .pdf_ops import (
     delete_pages, get_all_page_counts, get_page_count,
-    get_thumbnail, highlight_page, merge_pdfs, reorder_pages,
-    rotate_pages, split_pdf, undo_last_op,
+    get_thumbnail, highlight_page, merge_pdfs, redact_pdf,
+    reorder_pages, rotate_pages, split_pdf, undo_last_op,
 )
 from .ai_parser import parse_instruction
 
@@ -391,6 +391,16 @@ def _execute_action(session_dir: Path, action: dict) -> str:
         if src_bak.exists():
             shutil.move(str(src_bak), str(session_dir / (Path(new_name).stem + "_bak.pdf")))
         return f"Renamed {fname} → {new_name}"
+
+    elif atype == "REDACT":
+        fname = action.get("file", "")
+        terms = [str(t) for t in action.get("terms", []) if str(t).strip()]
+        if not fname:
+            raise ValueError("REDACT requires 'file'.")
+        if not terms:
+            raise ValueError("REDACT requires at least one non-empty term.")
+        output, hits = redact_pdf(session_dir, fname, terms)
+        return f"Redacted {hits} occurrence(s) of {len(terms)} term(s) in {fname} → {output}"
 
     else:
         raise ValueError(f"Unknown action type: '{atype}'")

@@ -261,6 +261,55 @@ def highlight_page(
     return filename
 
 
+def redact_pdf(session_dir: Path, filename: str, terms: list[str]) -> tuple[str, int]:
+    """
+    Permanently redact all occurrences of each search term in the PDF.
+    Applies opaque black fill rectangles and burns them into the page content
+    using PyMuPDF's redaction API (content is unrecoverable after save).
+
+    Creates a NEW file named <stem>-redacted.pdf — the source is NEVER modified.
+    Returns (output_filename, total_match_count).
+    """
+    from .session_mgr import sanitize_filename
+
+    src_path = _validate_file(session_dir, filename)
+    stem = Path(filename).stem
+    output_name = sanitize_filename(f"{stem}-redacted.pdf")
+    out_path = session_dir / output_name
+
+    clean_terms = [t.strip() for t in terms if t.strip()]
+    if not clean_terms:
+        raise ValueError("At least one non-empty search term is required.")
+
+    # Collision-safe output name: <stem>-redacted.pdf, then <stem>-redacted_1.pdf, etc.
+    candidate = output_name
+    counter = 1
+    while (session_dir / candidate).exists():
+        candidate = sanitize_filename(f"{stem}-redacted_{counter}.pdf")
+        counter += 1
+    output_name = candidate
+    out_path = session_dir / output_name
+
+    doc = fitz.open(str(src_path))
+    total_hits = 0
+
+    for page in doc:
+        for term in clean_terms:
+            rects = page.search_for(term, quads=False)
+            for rect in rects:
+                page.add_redact_annot(rect, fill=(0, 0, 0))
+                total_hits += 1
+        # PDF_REDACT_IMAGE_PIXELS blacks out the pixel region within each
+        # redaction rectangle in any underlying image layer, preventing
+        # recovery of sensitive content from image-backed (e.g. scanned) pages.
+        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+
+    doc.save(str(out_path), garbage=4, deflate=True)
+    doc.close()
+    _invalidate_thumb_cache(session_dir, output_name)
+    return output_name, total_hits
+
+
 def undo_last_op(session_dir: Path, filename: str) -> bool:
     """
     Restore a file from its .bak version.
