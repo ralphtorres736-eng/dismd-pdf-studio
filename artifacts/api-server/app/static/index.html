@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Assistant</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            navy:  { DEFAULT: '#1a2540', light: '#243057', dark: '#111829' },
+            ink:   { DEFAULT: '#1a1a2e', light: '#2d3561' },
+            steel: { DEFAULT: '#2b5797', light: '#3a6dba', muted: '#d6e4f7' },
+            parchment: { DEFAULT: '#f5f3ee', dark: '#ece9e1' },
+            sage:  '#1a7f4b',
+            rose:  '#c0392b',
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f5f3ee; }
+    html, body, #app { height: 100%; }
+
+    /* Upload drop zone */
+    .drop-zone { transition: background 0.2s, border-color 0.2s; }
+    .drop-zone.drag-over { background: #d6e4f7; border-color: #2b5797; }
+
+    /* Scrollbars */
+    .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+    .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+    .scroll-thin::-webkit-scrollbar-thumb { background: #c8c4bb; border-radius: 2px; }
+
+    /* Chat bubbles */
+    .bubble-ai   { background: #e8eef7; border-radius: 2px 14px 14px 14px; }
+    .bubble-user { background: #2b5797; color: white; border-radius: 14px 2px 14px 14px; }
+    .bubble-sys  { background: #f0ede6; border: 1px solid #d8d3c8; border-radius: 8px; font-size: 0.78rem; }
+
+    /* File card */
+    .file-card { cursor: pointer; transition: background 0.15s, box-shadow 0.15s; }
+    .file-card:hover { background: #e8eef7; }
+    .file-card.selected { background: #d6e4f7; border-left: 3px solid #2b5797; }
+
+    /* Thumbnail */
+    .thumb { transition: box-shadow 0.15s, transform 0.15s; }
+    .thumb:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.18); transform: translateY(-1px); }
+
+    /* Spinner */
+    .spinner { width: 18px; height: 18px; border: 2px solid #c8c4bb; border-top-color: #2b5797; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Fade-in */
+    .fade-in { animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Tab underline */
+    .tab-btn { border-bottom: 2px solid transparent; }
+    .tab-btn.active { border-bottom-color: #2b5797; color: #2b5797; }
+
+    /* Toolbar button */
+    .op-btn { transition: background 0.15s; }
+    .op-btn:hover { background: #d6e4f7; }
+    .op-btn:active { background: #c2d8f5; }
+  </style>
+</head>
+<body>
+
+<div id="app" class="flex flex-col h-full">
+
+  <!-- ── Top Bar ── -->
+  <header class="flex items-center justify-between px-5 py-3 bg-navy text-white shadow-md flex-shrink-0">
+    <div class="flex items-center gap-3">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4" y="2" width="16" height="20" rx="2" fill="#ffffff22" stroke="#fff" stroke-width="1.5"/>
+        <rect x="8" y="6" width="8" height="1.5" rx=".75" fill="#fff"/>
+        <rect x="8" y="9.5" width="8" height="1.5" rx=".75" fill="#fff"/>
+        <rect x="8" y="13" width="5" height="1.5" rx=".75" fill="#fff"/>
+        <path d="M17 17l7 7" stroke="#3a6dba" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="17" cy="17" r="4" fill="#3a6dba" stroke="#fff" stroke-width="1.2"/>
+      </svg>
+      <div>
+        <div class="font-semibold tracking-wide text-sm">PDF Assistant</div>
+        <div class="text-xs text-blue-200 leading-none">Legal-grade document editing</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="session-badge" class="text-xs text-blue-200 hidden">
+        Session active &mdash; files deleted on reset or after 2 h idle
+      </span>
+      <button onclick="resetSession()" class="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white rounded border border-white/20 transition">
+        Clear Session
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Main Content ── -->
+  <div class="flex flex-1 min-h-0">
+
+    <!-- LEFT PANEL: Files + Thumbnails -->
+    <aside class="flex flex-col w-80 min-w-64 bg-white border-r border-parchment-dark shadow-sm flex-shrink-0">
+
+      <!-- Upload zone -->
+      <div class="p-3 border-b border-parchment-dark">
+        <div
+          id="drop-zone"
+          class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-steel transition"
+          onclick="document.getElementById('file-input').click()"
+          ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
+        >
+          <div class="text-steel text-lg font-light mb-1">Upload PDFs</div>
+          <div class="text-xs text-gray-400">Drag &amp; drop or click to browse</div>
+          <div class="text-xs text-gray-300 mt-1">Up to 500 MB per file</div>
+          <div id="upload-spinner" class="hidden flex justify-center mt-2">
+            <div class="spinner"></div>
+          </div>
+        </div>
+        <input id="file-input" type="file" accept=".pdf" multiple class="hidden" onchange="handleFileInput(event)" />
+      </div>
+
+      <!-- Document list -->
+      <div class="flex-shrink-0 px-3 pt-3 pb-1">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Documents</span>
+          <span id="file-count" class="text-xs text-gray-400">0 files</span>
+        </div>
+      </div>
+      <div id="file-list" class="flex-shrink-0 max-h-48 overflow-y-auto scroll-thin px-2 pb-2">
+        <div class="text-xs text-gray-400 text-center py-4">No documents yet</div>
+      </div>
+
+      <!-- Divider -->
+      <div class="border-t border-parchment-dark"></div>
+
+      <!-- Thumbnail strip for selected file -->
+      <div class="flex-shrink-0 px-3 pt-2 pb-1 flex items-center justify-between">
+        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider" id="thumb-label">Pages</span>
+        <span id="thumb-file-name" class="text-xs text-gray-400 truncate max-w-32"></span>
+      </div>
+      <div id="thumb-strip" class="flex-1 overflow-y-auto scroll-thin px-2 pb-3">
+        <div class="text-xs text-gray-400 text-center py-6">Select a document to preview pages</div>
+      </div>
+
+      <!-- Bottom actions -->
+      <div class="border-t border-parchment-dark p-3 flex gap-2">
+        <button onclick="downloadAll()" class="flex-1 text-xs py-2 bg-steel text-white rounded hover:bg-steel-light transition font-medium">
+          Download All
+        </button>
+        <button id="download-selected-btn" onclick="downloadSelected()" class="flex-1 text-xs py-2 border border-steel text-steel rounded hover:bg-steel-muted transition font-medium" disabled>
+          Download Selected
+        </button>
+      </div>
+    </aside>
+
+    <!-- RIGHT PANEL: Chat + Operations -->
+    <main class="flex flex-col flex-1 min-w-0">
+
+      <!-- Tabs -->
+      <div class="flex border-b border-parchment-dark bg-white px-4 flex-shrink-0">
+        <button class="tab-btn active px-4 py-2.5 text-sm font-medium text-gray-600 mr-1" onclick="switchTab('chat', this)">AI Chat</button>
+        <button class="tab-btn px-4 py-2.5 text-sm font-medium text-gray-600" onclick="switchTab('manual', this)">Manual Controls</button>
+      </div>
+
+      <!-- CHAT TAB -->
+      <div id="tab-chat" class="flex flex-col flex-1 min-h-0">
+        <!-- Chat history -->
+        <div id="chat-log" class="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-3">
+          <div class="bubble-ai p-3 max-w-lg text-sm text-gray-700 fade-in">
+            <span class="font-medium text-steel block mb-1 text-xs uppercase tracking-wide">PDF Assistant</span>
+            Upload your PDF documents using the panel on the left, then describe what you need done in plain English. For example:<br><br>
+            <span class="italic text-gray-500">"Remove pages 3 through 5 from Response.pdf, then merge all exhibits into a single document called Final-Response.pdf"</span>
+          </div>
+        </div>
+
+        <!-- Chat input -->
+        <div class="border-t border-parchment-dark bg-white p-3 flex-shrink-0">
+          <div class="flex gap-2 items-end">
+            <textarea
+              id="chat-input"
+              rows="2"
+              class="flex-1 resize-none border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-steel focus:ring-1 focus:ring-steel placeholder-gray-300"
+              placeholder="Describe what you need done with your documents..."
+              onkeydown="chatKeydown(event)"
+            ></textarea>
+            <button
+              id="send-btn"
+              onclick="sendChat()"
+              class="px-4 py-2 bg-steel text-white rounded-lg text-sm font-medium hover:bg-steel-light transition flex-shrink-0"
+            >
+              Send
+            </button>
+          </div>
+          <div class="text-xs text-gray-300 mt-1.5">Press Ctrl+Enter to send. Your document content is never sent to AI &mdash; only file names and page counts.</div>
+        </div>
+      </div>
+
+      <!-- MANUAL CONTROLS TAB -->
+      <div id="tab-manual" class="hidden flex-1 overflow-y-auto scroll-thin p-5 space-y-4">
+
+        <!-- File selector for operations -->
+        <div>
+          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Target Document</label>
+          <select id="op-file-select" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-steel bg-white">
+            <option value="">-- Select a document --</option>
+          </select>
+        </div>
+
+        <!-- Operation cards -->
+        <div class="grid grid-cols-1 gap-3">
+
+          <!-- Delete pages -->
+          <div class="bg-white border border-parchment-dark rounded-lg p-4">
+            <div class="font-medium text-sm text-gray-700 mb-2">Delete Pages</div>
+            <div class="flex gap-2 items-center">
+              <input id="del-pages" type="text" placeholder="e.g. 3,4,5 or 3-7" class="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
+              <button onclick="manualDeletePages()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Delete</button>
+            </div>
+            <div class="text-xs text-gray-400 mt-1">Enter page numbers separated by commas, or a range like 3-7.</div>
+          </div>
+
+          <!-- Rotate pages -->
+          <div class="bg-white border border-parchment-dark rounded-lg p-4">
+            <div class="font-medium text-sm text-gray-700 mb-2">Rotate Pages</div>
+            <div class="flex gap-2 items-center">
+              <input id="rot-pages" type="text" placeholder="Pages (blank = all)" class="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
+              <select id="rot-degrees" class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-steel bg-white">
+                <option value="90">90 deg</option>
+                <option value="180">180 deg</option>
+                <option value="270">270 deg</option>
+              </select>
+              <button onclick="manualRotate()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Rotate</button>
+            </div>
+          </div>
+
+          <!-- Split / Extract -->
+          <div class="bg-white border border-parchment-dark rounded-lg p-4">
+            <div class="font-medium text-sm text-gray-700 mb-2">Extract Page Range</div>
+            <div class="flex gap-2 items-center flex-wrap">
+              <input id="split-start" type="number" min="1" placeholder="From page" class="w-24 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
+              <span class="text-gray-400 text-sm">to</span>
+              <input id="split-end" type="number" min="1" placeholder="To page" class="w-24 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
+              <input id="split-name" type="text" placeholder="Output filename" class="flex-1 min-w-32 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
+              <button onclick="manualSplit()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Extract</button>
+            </div>
+            <div class="text-xs text-gray-400 mt-1">Creates a new document. The source is unchanged.</div>
+          </div>
+
+          <!-- Merge -->
+          <div class="bg-white border border-parchment-dark rounded-lg p-4">
+            <div class="font-medium text-sm text-gray-700 mb-2">Merge Documents</div>
+            <div id="merge-list" class="space-y-1.5 mb-2 text-sm text-gray-400">No files loaded yet.</div>
+            <div class="flex gap-2 items-center mt-2">
+              <input id="merge-name" type="text" placeholder="Output filename (e.g. Final.pdf)" class="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
+              <button onclick="manualMerge()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Merge All</button>
+            </div>
+            <div class="text-xs text-gray-400 mt-1">Merges all listed documents in top-to-bottom order.</div>
+          </div>
+
+          <!-- Rename -->
+          <div class="bg-white border border-parchment-dark rounded-lg p-4">
+            <div class="font-medium text-sm text-gray-700 mb-2">Rename Document</div>
+            <div class="flex gap-2 items-center">
+              <input id="rename-new" type="text" placeholder="New filename (e.g. Final-Response.pdf)" class="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-steel" />
+              <button onclick="manualRename()" class="op-btn px-4 py-1.5 border border-gray-200 rounded text-sm text-gray-700">Rename</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ── Status bar ── -->
+  <footer class="border-t border-parchment-dark bg-white px-5 py-1.5 flex items-center justify-between flex-shrink-0">
+    <div id="status-bar" class="text-xs text-gray-400">Ready</div>
+    <button id="undo-btn" onclick="undoLast()" class="text-xs text-steel hover:underline hidden">
+      Undo last operation
+    </button>
+  </footer>
+
+</div>
+
+<!-- ── Toast notification ── -->
+<div id="toast" class="fixed bottom-6 right-6 hidden z-50">
+  <div id="toast-inner" class="px-4 py-3 rounded-lg shadow-lg text-sm text-white max-w-xs fade-in"></div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────────────────────────────────
+let state = {
+  files: [],          // [{name, pages, size_bytes}]
+  selected: null,     // filename of selected document
+  thumbsLoaded: {},   // {filename: totalPageCount} — tracks loaded thumbs
+  lastOpFile: null,   // filename for which undo is available
+  chatBusy: false,
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Boot
+// ──────────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  refreshFiles();
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// File upload
+// ──────────────────────────────────────────────────────────────────────────
+function onDragOver(e) { e.preventDefault(); document.getElementById('drop-zone').classList.add('drag-over'); }
+function onDragLeave(e) { document.getElementById('drop-zone').classList.remove('drag-over'); }
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf' || f.name.endsWith('.pdf'));
+  if (files.length) uploadFiles(files);
+}
+function handleFileInput(e) {
+  const files = Array.from(e.target.files);
+  if (files.length) uploadFiles(files);
+  e.target.value = '';
+}
+
+async function uploadFiles(files) {
+  setStatus(`Uploading ${files.length} file(s)...`);
+  showSpinner(true);
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.errors && data.errors.length) {
+      data.errors.forEach(e => toast(`${e.name}: ${e.error}`, 'error'));
+    }
+    if (data.saved && data.saved.length) {
+      toast(`Uploaded: ${data.saved.join(', ')}`, 'success');
+    }
+    setFilesState(data.files);
+    document.getElementById('session-badge').classList.remove('hidden');
+  } catch (err) {
+    toast('Upload failed. Please try again.', 'error');
+  } finally {
+    showSpinner(false);
+    setStatus('Ready');
+  }
+}
+
+function showSpinner(on) {
+  document.getElementById('upload-spinner').classList.toggle('hidden', !on);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// File list + thumbnails
+// ──────────────────────────────────────────────────────────────────────────
+async function refreshFiles() {
+  try {
+    const res = await fetch('/api/files');
+    const data = await res.json();
+    setFilesState(data.files || []);
+  } catch (_) {}
+}
+
+function setFilesState(files) {
+  state.files = files;
+  renderFileList();
+  renderMergeList();
+  renderOpSelect();
+  updateDownloadBtns();
+  document.getElementById('session-badge').classList.toggle('hidden', files.length === 0);
+  if (state.selected && !files.find(f => f.name === state.selected)) {
+    state.selected = null;
+    renderThumbs(null);
+  }
+  if (!state.selected && files.length > 0) selectFile(files[0].name);
+}
+
+function renderFileList() {
+  const el = document.getElementById('file-list');
+  document.getElementById('file-count').textContent = `${state.files.length} file${state.files.length !== 1 ? 's' : ''}`;
+  if (!state.files.length) {
+    el.innerHTML = '<div class="text-xs text-gray-400 text-center py-4">No documents yet</div>';
+    return;
+  }
+  el.innerHTML = state.files.map(f => `
+    <div class="file-card ${f.name === state.selected ? 'selected' : ''} flex items-center justify-between px-2 py-2 rounded-md mb-1"
+         onclick="selectFile('${escHtml(f.name)}')">
+      <div class="min-w-0 flex-1">
+        <div class="text-xs font-medium text-gray-700 truncate" title="${escHtml(f.name)}">${escHtml(f.name)}</div>
+        <div class="text-xs text-gray-400">${f.pages} page${f.pages !== 1 ? 's' : ''} &middot; ${fmtSize(f.size_bytes)}</div>
+      </div>
+      <button onclick="event.stopPropagation(); downloadFile('${escHtml(f.name)}')"
+              title="Download"
+              class="ml-2 text-gray-300 hover:text-steel flex-shrink-0 text-xs">&#8595;</button>
+    </div>
+  `).join('');
+}
+
+function renderMergeList() {
+  const el = document.getElementById('merge-list');
+  if (!state.files.length) {
+    el.innerHTML = '<div class="text-gray-400">No files loaded yet.</div>';
+    return;
+  }
+  el.innerHTML = state.files.map((f, i) => `
+    <div class="flex items-center gap-2 py-1 border-b border-parchment-dark last:border-0">
+      <span class="text-gray-300 text-xs w-4 text-right">${i+1}.</span>
+      <span class="text-gray-700 text-xs truncate flex-1">${escHtml(f.name)}</span>
+      <span class="text-gray-400 text-xs">${f.pages}p</span>
+    </div>
+  `).join('');
+}
+
+function renderOpSelect() {
+  const sel = document.getElementById('op-file-select');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">-- Select a document --</option>' +
+    state.files.map(f => `<option value="${escHtml(f.name)}" ${f.name === cur ? 'selected' : ''}>${escHtml(f.name)}</option>`).join('');
+  if (!cur && state.selected) sel.value = state.selected;
+}
+
+function selectFile(name) {
+  state.selected = name;
+  renderFileList();
+  document.getElementById('op-file-select').value = name;
+  document.getElementById('download-selected-btn').disabled = false;
+  renderThumbs(name);
+}
+
+async function renderThumbs(filename) {
+  const strip = document.getElementById('thumb-strip');
+  const label = document.getElementById('thumb-file-name');
+  if (!filename) {
+    strip.innerHTML = '<div class="text-xs text-gray-400 text-center py-6">Select a document to preview pages</div>';
+    label.textContent = '';
+    return;
+  }
+  const file = state.files.find(f => f.name === filename);
+  if (!file) return;
+  label.textContent = filename;
+  strip.innerHTML = '';
+
+  for (let p = 1; p <= file.pages; p++) {
+    const div = document.createElement('div');
+    div.className = 'mb-3 cursor-default';
+    div.innerHTML = `
+      <div class="bg-parchment rounded overflow-hidden border border-gray-200 thumb">
+        <img src="/api/thumbnail/${encodeURIComponent(filename)}/${p}"
+             alt="Page ${p}"
+             loading="lazy"
+             class="w-full object-cover"
+             onerror="this.parentElement.innerHTML='<div class=&quot;py-4 text-center text-gray-300 text-xs&quot;>Error</div>'" />
+      </div>
+      <div class="text-center text-xs text-gray-400 mt-1">p. ${p}</div>
+    `;
+    strip.appendChild(div);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Chat
+// ──────────────────────────────────────────────────────────────────────────
+function chatKeydown(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    sendChat();
+  }
+}
+
+async function sendChat() {
+  if (state.chatBusy) return;
+  const input = document.getElementById('chat-input');
+  const instruction = input.value.trim();
+  if (!instruction) return;
+
+  appendChatBubble('user', instruction);
+  input.value = '';
+  state.chatBusy = true;
+  document.getElementById('send-btn').disabled = true;
+  setStatus('AI is parsing your instruction...');
+
+  const thinkingId = appendChatBubble('ai', '<div class="spinner"></div>', true);
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction }),
+    });
+    const data = await res.json();
+    removeBubble(thinkingId);
+
+    if (!res.ok) {
+      const errMsg = data.detail || 'An error occurred.';
+      appendChatBubble('sys', `Error: ${errMsg}`);
+      toast(errMsg, 'error');
+    } else {
+      let msg = `<strong class="block mb-1 text-steel text-xs uppercase tracking-wide">Done</strong>` +
+                escHtml(data.summary);
+      if (data.errors && data.errors.length) {
+        msg += `<div class="mt-2 text-rose text-xs">Some actions failed:<br>${
+          data.errors.map(e => `${escHtml(e.action)}: ${escHtml(e.error)}`).join('<br>')
+        }</div>`;
+      }
+      appendChatBubble('ai', msg, false, true);
+      setFilesState(data.files || []);
+      if (data.actions_executed.length) {
+        const lastAction = data.actions_executed[data.actions_executed.length - 1];
+        const fileForUndo = extractFileName(lastAction);
+        if (fileForUndo) enableUndo(fileForUndo);
+      }
+      setStatus('Ready');
+      toast('Operations completed.', 'success');
+    }
+  } catch (err) {
+    removeBubble(thinkingId);
+    appendChatBubble('sys', 'Network error. Please try again.');
+    toast('Network error.', 'error');
+  } finally {
+    state.chatBusy = false;
+    document.getElementById('send-btn').disabled = false;
+    setStatus('Ready');
+  }
+}
+
+function extractFileName(action) {
+  if (!action || !action.result) return null;
+  const files = state.files;
+  // Find a file mentioned in the result string
+  for (const f of files) {
+    if (action.result.includes(f.name)) return f.name;
+  }
+  return files.length ? files[files.length - 1].name : null;
+}
+
+let bubbleCounter = 0;
+function appendChatBubble(role, html, raw = false, fadeIn = false) {
+  const log = document.getElementById('chat-log');
+  const id = `bubble-${++bubbleCounter}`;
+  const div = document.createElement('div');
+  div.id = id;
+  div.className = `fade-in`;
+
+  if (role === 'user') {
+    div.innerHTML = `<div class="flex justify-end"><div class="bubble-user px-4 py-2.5 text-sm max-w-lg">${raw ? html : escHtml(html)}</div></div>`;
+  } else if (role === 'sys') {
+    div.innerHTML = `<div class="bubble-sys px-3 py-2 text-gray-600 max-w-lg">${raw ? html : escHtml(html)}</div>`;
+  } else {
+    div.innerHTML = `
+      <div class="flex gap-2 items-start">
+        <div class="w-6 h-6 rounded-full bg-steel flex-shrink-0 mt-1 flex items-center justify-center">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="0" width="7" height="9" rx="1" fill="white" fill-opacity=".6"/><rect x="2" y="1.5" width="3.5" height=".8" rx=".4" fill="white"/><rect x="2" y="3" width="3.5" height=".8" rx=".4" fill="white"/><rect x="2" y="4.5" width="2" height=".8" rx=".4" fill="white"/></svg>
+        </div>
+        <div class="bubble-ai px-4 py-2.5 text-sm text-gray-700 max-w-lg">${raw ? html : html}</div>
+      </div>`;
+  }
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return id;
+}
+
+function removeBubble(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Manual operations
+// ──────────────────────────────────────────────────────────────────────────
+function getOpFile() {
+  const sel = document.getElementById('op-file-select').value;
+  if (!sel) { toast('Select a document first.', 'error'); return null; }
+  return sel;
+}
+
+async function applyOp(action) {
+  setStatus(`Applying ${action.type.toLowerCase()}...`);
+  try {
+    const res = await fetch('/api/operate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.detail || 'Operation failed.', 'error');
+      setStatus('Error');
+    } else {
+      setFilesState(data.files || []);
+      toast(data.result, 'success');
+      enableUndo(action.file || action.output);
+      setStatus('Ready');
+    }
+  } catch (err) {
+    toast('Network error.', 'error');
+    setStatus('Error');
+  }
+}
+
+function parsePageList(str) {
+  const pages = [];
+  for (const part of str.split(',')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (trimmed.includes('-')) {
+      const [a, b] = trimmed.split('-').map(Number);
+      if (!isNaN(a) && !isNaN(b)) for (let i = a; i <= b; i++) pages.push(i);
+    } else {
+      const n = Number(trimmed);
+      if (!isNaN(n)) pages.push(n);
+    }
+  }
+  return [...new Set(pages)].sort((a, b) => a - b);
+}
+
+function manualDeletePages() {
+  const file = getOpFile(); if (!file) return;
+  const raw = document.getElementById('del-pages').value.trim();
+  if (!raw) { toast('Enter page numbers to delete.', 'error'); return; }
+  const pages = parsePageList(raw);
+  if (!pages.length) { toast('No valid page numbers found.', 'error'); return; }
+  applyOp({ type: 'DELETE_PAGES', file, pages });
+}
+
+function manualRotate() {
+  const file = getOpFile(); if (!file) return;
+  const raw = document.getElementById('rot-pages').value.trim();
+  const pages = raw ? parsePageList(raw) : [];
+  const degrees = Number(document.getElementById('rot-degrees').value);
+  applyOp({ type: 'ROTATE', file, pages, degrees });
+}
+
+function manualSplit() {
+  const file = getOpFile(); if (!file) return;
+  const start = Number(document.getElementById('split-start').value);
+  const end   = Number(document.getElementById('split-end').value);
+  const name  = document.getElementById('split-name').value.trim() || 'extract.pdf';
+  if (!start || !end) { toast('Enter start and end page numbers.', 'error'); return; }
+  applyOp({ type: 'SPLIT', file, start_page: start, end_page: end, output: name });
+}
+
+function manualMerge() {
+  if (state.files.length < 1) { toast('No files to merge.', 'error'); return; }
+  const output = document.getElementById('merge-name').value.trim() || 'merged.pdf';
+  applyOp({ type: 'MERGE', files: state.files.map(f => f.name), output });
+}
+
+function manualRename() {
+  const file = getOpFile(); if (!file) return;
+  const newName = document.getElementById('rename-new').value.trim();
+  if (!newName) { toast('Enter a new filename.', 'error'); return; }
+  applyOp({ type: 'RENAME', file, new_name: newName });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Undo
+// ──────────────────────────────────────────────────────────────────────────
+function enableUndo(filename) {
+  state.lastOpFile = filename;
+  document.getElementById('undo-btn').classList.remove('hidden');
+}
+
+async function undoLast() {
+  if (!state.lastOpFile) return;
+  setStatus(`Undoing last operation on ${state.lastOpFile}...`);
+  try {
+    const res = await fetch(`/api/undo/${encodeURIComponent(state.lastOpFile)}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.detail || 'Nothing to undo.', 'error');
+    } else {
+      toast(`Restored ${data.restored}`, 'success');
+      setFilesState(data.files || []);
+      state.lastOpFile = null;
+      document.getElementById('undo-btn').classList.add('hidden');
+    }
+  } catch (_) { toast('Undo failed.', 'error'); }
+  setStatus('Ready');
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Download
+// ──────────────────────────────────────────────────────────────────────────
+function downloadFile(name) {
+  window.location.href = `/api/download/${encodeURIComponent(name)}`;
+}
+function downloadSelected() {
+  if (state.selected) downloadFile(state.selected);
+}
+function downloadAll() {
+  if (!state.files.length) { toast('No files to download.', 'error'); return; }
+  window.location.href = '/api/download-all';
+}
+function updateDownloadBtns() {
+  document.getElementById('download-selected-btn').disabled = !state.selected;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Session reset
+// ──────────────────────────────────────────────────────────────────────────
+async function resetSession() {
+  if (!confirm('Clear all uploaded documents and start a new session?')) return;
+  const res = await fetch('/api/reset', { method: 'POST' });
+  const data = await res.json();
+  state.selected = null;
+  state.lastOpFile = null;
+  state.thumbsLoaded = {};
+  document.getElementById('undo-btn').classList.add('hidden');
+  setFilesState([]);
+  document.getElementById('chat-log').innerHTML = `
+    <div class="bubble-ai p-3 max-w-lg text-sm text-gray-700 fade-in">
+      <span class="font-medium text-steel block mb-1 text-xs uppercase tracking-wide">PDF Assistant</span>
+      Session cleared. Upload your documents to begin.
+    </div>`;
+  renderThumbs(null);
+  toast('Session cleared.', 'success');
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// UI utilities
+// ──────────────────────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.getElementById('tab-chat').classList.toggle('hidden', name !== 'chat');
+  document.getElementById('tab-chat').classList.toggle('flex', name === 'chat');
+  document.getElementById('tab-chat').classList.toggle('flex-col', name === 'chat');
+  document.getElementById('tab-manual').classList.toggle('hidden', name !== 'manual');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function setStatus(msg) { document.getElementById('status-bar').textContent = msg; }
+
+let toastTimer;
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  const inner = document.getElementById('toast-inner');
+  const colors = { success: '#1a7f4b', error: '#c0392b', info: '#2b5797' };
+  inner.style.background = colors[type] || colors.info;
+  inner.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+</script>
+</body>
+</html>
