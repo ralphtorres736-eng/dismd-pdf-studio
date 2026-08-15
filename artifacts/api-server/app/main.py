@@ -414,10 +414,12 @@ def _execute_action(session_dir: Path, action: dict) -> str:
     if atype == "MERGE":
         files = action.get("files", [])
         output = sanitize_filename(action.get("output", "merged.pdf"))
+        cover_page = action.get("cover_page")  # None when not requested
         if len(files) < 1:
             raise ValueError("MERGE requires at least one file.")
-        out = merge_pdfs(session_dir, files, output)
-        return f"Merged {len(files)} file(s) → {out}"
+        out = merge_pdfs(session_dir, files, output, cover_page=cover_page)
+        cover_note = " (with cover page)" if cover_page else ""
+        return f"Merged {len(files)} file(s){cover_note} → {out}"
 
     elif atype == "DELETE_PAGES":
         fname = action.get("file", "")

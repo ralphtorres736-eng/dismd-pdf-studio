@@ -39,8 +39,17 @@ OUTPUT SCHEMA (always return exactly this structure):
   "actions": [
     // One or more action objects. Allowed types:
     
-    // MERGE: combine files in listed order
+    // MERGE: combine files in listed order. cover_page is optional.
     {"type": "MERGE", "files": ["A.pdf", "B.pdf"], "output": "merged.pdf"},
+    // MERGE with cover page — include when the user requests a cover/title page:
+    {"type": "MERGE", "files": ["A.pdf", "B.pdf"], "output": "EXHIBIT_A.pdf",
+     "cover_page": {
+       "title": "EXHIBIT A",
+       "subtitle": "Judicial Grievance Against Honorable Judge X",
+       "body": ["Complainant / Counsel: Lisa M. Potter / The Potter Law Group",
+                "Transcript 1: Cause No. 25DC-CV-01579 (In the Interest of ...)",
+                "Transcript 2: Cause No. 26DC-CV-00505 (In the Matter of ...)"]
+     }},
     
     // DELETE_PAGES: remove specific pages (1-based) from a file
     {"type": "DELETE_PAGES", "file": "A.pdf", "pages": [3, 4, 5]},

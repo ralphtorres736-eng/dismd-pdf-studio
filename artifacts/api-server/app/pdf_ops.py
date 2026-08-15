@@ -96,9 +96,86 @@ def get_all_page_counts(session_dir: Path) -> dict[str, int]:
 # Mutating operations (all create a .bak before modifying)
 # ---------------------------------------------------------------------------
 
-def merge_pdfs(session_dir: Path, filenames: list[str], output_name: str) -> str:
+def generate_cover_page(cover_page: dict) -> "fitz.Document":
+    """
+    Generate a single-page cover page PDF from structured data.
+    Returns an open fitz.Document — caller must close it.
+
+    cover_page keys (all optional):
+      title    — bold centered heading (e.g. "EXHIBIT A")
+      subtitle — centered sub-heading (e.g. case name / judge)
+      body     — list[str] of left-aligned lines (parties, cause numbers, etc.)
+    """
+    PAGE_W, PAGE_H = 612, 792   # US Letter in PDF points
+    MARGIN = 72                  # 1-inch margins
+
+    doc = fitz.open()
+    page = doc.new_page(width=PAGE_W, height=PAGE_H)
+
+    title    = (cover_page.get("title") or "").strip()
+    subtitle = (cover_page.get("subtitle") or "").strip()
+    body     = [str(ln).strip() for ln in (cover_page.get("body") or []) if str(ln).strip()]
+
+    y = 210  # vertical cursor — start below top margin
+
+    # ── TITLE  (24 pt bold, centered) ──────────────────────────────────────
+    if title:
+        rc = fitz.Rect(MARGIN, y, PAGE_W - MARGIN, y + 60)   # tall rect — never clips
+        page.insert_textbox(
+            rc, title,
+            fontname="hebo",          # Helvetica-Bold (PyMuPDF base-14 alias)
+            fontsize=24,
+            align=1,                  # TEXT_ALIGN_CENTER
+            color=(0, 0, 0),
+        )
+        y += 52
+
+    # ── SUBTITLE  (13 pt, centered, may wrap) ───────────────────────────────
+    if subtitle:
+        rc = fitz.Rect(MARGIN, y, PAGE_W - MARGIN, y + 72)   # extra height for wrapping
+        page.insert_textbox(
+            rc, subtitle,
+            fontname="helv",          # Helvetica (PyMuPDF base-14 alias)
+            fontsize=13,
+            align=1,                  # TEXT_ALIGN_CENTER
+            color=(0.2, 0.2, 0.2),
+        )
+        y += 72
+
+    # ── HORIZONTAL RULE ────────────────────────────────────────────────────
+    y += 10
+    page.draw_line(
+        fitz.Point(MARGIN, y), fitz.Point(PAGE_W - MARGIN, y),
+        color=(0.55, 0.55, 0.55), width=0.75,
+    )
+    y += 24
+
+    # ── BODY LINES  (11 pt, left-aligned) ──────────────────────────────────
+    for line in body:
+        if y > PAGE_H - MARGIN:
+            break                     # safety — never overflow the page
+        rc = fitz.Rect(MARGIN, y, PAGE_W - MARGIN, y + 28)   # 28pt per line at 11pt font
+        page.insert_textbox(
+            rc, line,
+            fontname="helv",          # Helvetica (PyMuPDF base-14 alias)
+            fontsize=11,
+            align=0,                  # TEXT_ALIGN_LEFT
+            color=(0, 0, 0),
+        )
+        y += 20
+
+    return doc
+
+
+def merge_pdfs(
+    session_dir: Path,
+    filenames: list[str],
+    output_name: str,
+    cover_page: dict | None = None,
+) -> str:
     """
     Merge PDFs in the given order into output_name.
+    If cover_page is provided, a generated cover page is prepended as page 1.
     Returns the output filename.
     """
     from .session_mgr import sanitize_filename
@@ -106,6 +183,13 @@ def merge_pdfs(session_dir: Path, filenames: list[str], output_name: str) -> str
     out_path = session_dir / output_name
 
     result = fitz.open()
+
+    # Prepend generated cover page if requested
+    if cover_page:
+        cover_doc = generate_cover_page(cover_page)
+        result.insert_pdf(cover_doc)
+        cover_doc.close()
+
     for fname in filenames:
         src_path = _validate_file(session_dir, fname)
         src = fitz.open(str(src_path))
