@@ -20,7 +20,7 @@ from openai import OpenAI
 
 ALLOWED_ACTION_TYPES = {
     "MERGE", "DELETE_PAGES", "SPLIT", "ROTATE", "REORDER",
-    "HIGHLIGHT", "RENAME", "REDACT"
+    "HIGHLIGHT", "RENAME", "REDACT", "ADD_STICKER"
 }
 
 SYSTEM_PROMPT = """You are a PDF structural command parser for a legal document management tool.
@@ -74,7 +74,26 @@ OUTPUT SCHEMA (always return exactly this structure):
     // REDACT: permanently black out all occurrences of each term.
     // terms come ONLY from the user's instruction — never from document content.
     // Output is saved as <original>-redacted.pdf. This action is irreversible.
-    {"type": "REDACT", "file": "A.pdf", "terms": ["John Smith", "123-45-6789"]}
+    {"type": "REDACT", "file": "A.pdf", "terms": ["John Smith", "123-45-6789"]},
+
+    // ADD_STICKER: overlay a vector sticker/stamp directly on one or more pages.
+    // category: "legal_exhibit" | "status_stamp" | "novelty"
+    // preset (legal_exhibit): "PLAINTIFF" | "DEFENDANT" | "PETITIONER" | "RESPONDENT" | "EXHIBIT"
+    // preset (status_stamp):  "CONFIDENTIAL" | "URGENT" | "DRAFT"
+    // preset (novelty):       "BORN TO ARGUE" | "LIVE LAUGH LAWSUIT" | "BILLING YOU FOR THIS" | "OBJECTION" | "JUSTICE SERVED"
+    // position: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center"  (default: "bottom-right")
+    // custom_text: optional label displayed below the preset header (legal_exhibit only)
+    // rotation: degrees to tilt the sticker, -15 to +15  (default: 0, useful for novelty stickers)
+    // page_numbers: 1-based list; default [1] if omitted
+    {"type": "ADD_STICKER", "file": "A.pdf", "page_numbers": [1],
+     "category": "legal_exhibit", "preset": "PLAINTIFF",
+     "custom_text": "EXHIBIT A", "position": "bottom-right", "rotation": 0},
+    {"type": "ADD_STICKER", "file": "A.pdf", "page_numbers": [1, 2, 3, 4, 5],
+     "category": "status_stamp", "preset": "CONFIDENTIAL",
+     "position": "top-right", "rotation": 0},
+    {"type": "ADD_STICKER", "file": "A.pdf", "page_numbers": [3],
+     "category": "novelty", "preset": "OBJECTION",
+     "position": "bottom-right", "rotation": -10}
   ],
   "summary": "Plain-English description of what will be done."
 }"""

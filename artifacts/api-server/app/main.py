@@ -22,7 +22,7 @@ from .session_mgr import (
     sanitize_filename, cleanup_expired_sessions,
 )
 from .pdf_ops import (
-    check_has_text, delete_pages, get_all_page_counts, get_page_count,
+    apply_sticker, check_has_text, delete_pages, get_all_page_counts, get_page_count,
     get_thumbnail, highlight_page, merge_pdfs, ocr_pdf, redact_pdf,
     reorder_pages, rotate_pages, split_pdf, undo_last_op,
 )
@@ -483,6 +483,25 @@ def _execute_action(session_dir: Path, action: dict) -> str:
             raise ValueError("REDACT requires at least one non-empty term.")
         output, hits = redact_pdf(session_dir, fname, terms)
         return f"Redacted {hits} occurrence(s) of {len(terms)} term(s) in {fname} → {output}"
+
+    elif atype == "ADD_STICKER":
+        fname = action.get("file", "")
+        if not fname:
+            raise ValueError("ADD_STICKER requires 'file'.")
+        page_numbers = [int(p) for p in action.get("page_numbers", [1])] or [1]
+        sticker_config = {
+            "category": str(action.get("category", "legal_exhibit")),
+            "preset":   str(action.get("preset", "EXHIBIT")),
+            "position": str(action.get("position", "bottom-right")),
+            "rotation": float(action.get("rotation", 0)),
+            "custom_text": str(action.get("custom_text", "")) if action.get("custom_text") else "",
+        }
+        _, applied_pages = apply_sticker(session_dir, fname, page_numbers, sticker_config)
+        pages_str = ", ".join(str(p) for p in applied_pages) if applied_pages else "none"
+        return (
+            f"Applied {sticker_config['preset']} {sticker_config['category']} sticker "
+            f"to page(s) {pages_str} of {fname}"
+        )
 
     else:
         raise ValueError(f"Unknown action type: '{atype}'")

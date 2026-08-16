@@ -40,6 +40,23 @@ def _validate_file(session_dir: Path, filename: str) -> Path:
     return safe
 
 
+def _safe_save(doc: fitz.Document, path: Path) -> None:
+    """
+    Save a modified Document back to *path* via a sibling temp file then atomic replace.
+
+    PyMuPDF ≥ 1.24 raises "save to original must be incremental" when the destination
+    string matches doc.name (the path from which the file was opened).  Writing to a
+    different temp path sidesteps the restriction without needing incremental mode.
+    """
+    tmp = path.parent / (path.stem + "_~tmp_save.pdf")
+    try:
+        doc.save(str(tmp), garbage=4, deflate=True)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    tmp.replace(path)
+
+
 # ---------------------------------------------------------------------------
 # Read-only operations
 # ---------------------------------------------------------------------------
@@ -228,7 +245,7 @@ def delete_pages(session_dir: Path, filename: str, pages: list[int]) -> str:
     for idx in zero_based:
         doc.delete_page(idx)
 
-    doc.save(str(path), incremental=False, garbage=4, deflate=True)
+    _safe_save(doc, path)
     doc.close()
     return filename
 
@@ -279,7 +296,7 @@ def rotate_pages(session_dir: Path, filename: str, pages: list[int], degrees: in
         page = doc[idx]
         page.set_rotation((page.rotation + degrees) % 360)
 
-    doc.save(str(path), incremental=False, garbage=4, deflate=True)
+    _safe_save(doc, path)
     doc.close()
     return filename
 
@@ -350,7 +367,7 @@ def highlight_page(
         annot.set_info(content=label)
     annot.update()
 
-    doc.save(str(path), incremental=False, garbage=4, deflate=True)
+    _safe_save(doc, path)
     doc.close()
     return filename
 
@@ -523,3 +540,241 @@ def undo_last_op(session_dir: Path, filename: str) -> bool:
         return True
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# Sticker / Stamp Overlay Engine
+# ---------------------------------------------------------------------------
+
+# ── Preset colour tables (all RGB floats 0-1) ─────────────────────────────
+
+_EXHIBIT_PRESETS: dict[str, dict] = {
+    "PLAINTIFF":  {"fill": (0.992, 0.878, 0.278), "tc": (0.0, 0.0, 0.0), "header": "PLAINTIFF'S\nEXHIBIT"},
+    "DEFENDANT":  {"fill": (0.220, 0.741, 0.973), "tc": (0.0, 0.0, 0.0), "header": "DEFENDANT'S\nEXHIBIT"},
+    "PETITIONER": {"fill": (0.984, 0.573, 0.188), "tc": (0.0, 0.0, 0.0), "header": "PETITIONER'S\nEXHIBIT"},
+    "RESPONDENT": {"fill": (0.176, 0.831, 0.749), "tc": (0.0, 0.0, 0.0), "header": "RESPONDENT'S\nEXHIBIT"},
+    "EXHIBIT":    {"fill": (1.000, 1.000, 1.000), "tc": (0.0, 0.0, 0.0), "header": "EXHIBIT"},
+}
+
+_NOVELTY_PRESETS: dict[str, dict] = {
+    "BORN TO ARGUE":        {"fill": (0.118, 0.227, 0.373), "tc": (0.965, 0.624, 0.043)},
+    "LIVE LAUGH LAWSUIT":   {"fill": (0.078, 0.325, 0.173), "tc": (1.0, 1.0, 1.0)},
+    "BILLING YOU FOR THIS": {"fill": (0.471, 0.208, 0.059), "tc": (0.996, 0.953, 0.773)},
+    "OBJECTION":            {"fill": (0.498, 0.114, 0.114), "tc": (1.0, 1.0, 1.0)},
+    "JUSTICE SERVED":       {"fill": (0.118, 0.251, 0.694), "tc": (1.0, 1.0, 1.0)},
+}
+
+
+# ── Geometry helpers ──────────────────────────────────────────────────────
+
+def _sticker_rect(page_rect: fitz.Rect, position: str, w: float, h: float) -> fitz.Rect:
+    """Return a Rect of size w×h placed at position on the page (20 pt margin)."""
+    margin = 20.0
+    pw, ph = page_rect.width, page_rect.height
+    pos = position.lower()
+    if pos == "top-left":
+        return fitz.Rect(margin, margin, margin + w, margin + h)
+    elif pos == "top-right":
+        return fitz.Rect(pw - margin - w, margin, pw - margin, margin + h)
+    elif pos == "bottom-left":
+        return fitz.Rect(margin, ph - margin - h, margin + w, ph - margin)
+    elif pos == "center":
+        return fitz.Rect((pw - w) / 2, (ph - h) / 2, (pw + w) / 2, (ph + h) / 2)
+    else:  # default: bottom-right
+        return fitz.Rect(pw - margin - w, ph - margin - h, pw - margin, ph - margin)
+
+
+def _inner(rect: fitz.Rect, pad: float) -> fitz.Rect:
+    """Shrink a Rect by pad on all sides."""
+    return fitz.Rect(rect.x0 + pad, rect.y0 + pad, rect.x1 - pad, rect.y1 - pad)
+
+
+# ── Per-category drawing helpers ──────────────────────────────────────────
+
+def _draw_legal_exhibit(page: fitz.Page, position: str, preset_key: str, custom_text: str) -> None:
+    """Draw a coloured exhibit tab (100 × 72 pt)."""
+    key = preset_key.upper()
+    preset = _EXHIBIT_PRESETS.get(key, _EXHIBIT_PRESETS["EXHIBIT"])
+    fill = preset["fill"]
+    tc   = preset["tc"]
+    header = preset["header"]
+
+    rect = _sticker_rect(page.rect, position, 100.0, 72.0)
+    mid_y = rect.y0 + 42.0        # separator line y-coordinate
+
+    # Filled background + black border
+    shape = page.new_shape()
+    shape.draw_rect(rect)
+    shape.finish(fill=fill, color=(0.0, 0.0, 0.0), width=1.2)
+    shape.commit()
+
+    # Separator line
+    shape2 = page.new_shape()
+    shape2.draw_line(fitz.Point(rect.x0 + 4, mid_y), fitz.Point(rect.x1 - 4, mid_y))
+    shape2.finish(color=(0.0, 0.0, 0.0), width=0.7)
+    shape2.commit()
+
+    # Header text (bold, e.g. "PLAINTIFF'S\nEXHIBIT")
+    header_rect = fitz.Rect(rect.x0 + 2, rect.y0 + 4, rect.x1 - 2, mid_y - 2)
+    page.insert_textbox(header_rect, header, fontname="hebo", fontsize=8.5,
+                        color=tc, align=1)  # align=1 → centred
+
+    # Custom label below separator
+    if custom_text:
+        label_rect = fitz.Rect(rect.x0 + 2, mid_y + 3, rect.x1 - 2, rect.y1 - 3)
+        page.insert_textbox(label_rect, custom_text, fontname="helv", fontsize=8,
+                            color=tc, align=1)
+
+
+def _draw_status_stamp(page: fitz.Page, position: str, preset_key: str) -> None:
+    """Draw CONFIDENTIAL, URGENT, or DRAFT status stamps."""
+    key = preset_key.upper()
+
+    if key == "DRAFT":
+        # Large diagonal-ish watermark: draw "DRAFT" vertically centred, rotated 90°
+        pw, ph = page.rect.width, page.rect.height
+        # rotate=90 in insert_text means the text runs bottom-to-top in PDF coordinates,
+        # which visually reads left-to-right when the page is rotated — we use 0 here
+        # for a clean centred horizontal watermark that spans the page width.
+        draft_rect = fitz.Rect(pw * 0.1, ph * 0.38, pw * 0.90, ph * 0.62)
+        # Draw a very light grey filled rect behind the text so it reads as a band
+        shape = page.new_shape()
+        shape.draw_rect(draft_rect)
+        shape.finish(fill=(0.90, 0.90, 0.90), color=None, width=0)
+        shape.commit()
+        page.insert_textbox(draft_rect, "DRAFT",
+                            fontname="hebo", fontsize=80,
+                            color=(0.612, 0.639, 0.686), align=1)
+        return
+
+    if key == "URGENT":
+        # Filled red banner
+        rect = _sticker_rect(page.rect, position, 210.0, 38.0)
+        shape = page.new_shape()
+        shape.draw_rect(rect)
+        shape.finish(fill=(0.863, 0.149, 0.149), color=(0.863, 0.149, 0.149), width=0)
+        shape.commit()
+        page.insert_textbox(_inner(rect, 3), "URGENT / TIME SENSITIVE",
+                            fontname="hebo", fontsize=13,
+                            color=(1.0, 1.0, 1.0), align=1)
+        return
+
+    # Default: CONFIDENTIAL — thick red border frame, red text
+    rect = _sticker_rect(page.rect, position, 210.0, 42.0)
+    shape = page.new_shape()
+    shape.draw_rect(rect)
+    shape.finish(fill=None, color=(0.863, 0.149, 0.149), width=3.0)
+    shape.commit()
+    page.insert_textbox(_inner(rect, 4), "CONFIDENTIAL",
+                        fontname="hebo", fontsize=16,
+                        color=(0.863, 0.149, 0.149), align=1)
+
+
+def _draw_novelty(page: fitz.Page, position: str, preset_key: str,
+                  rotation: float, custom_text: str) -> None:
+    """Draw a novelty badge, with optional slight rotation via morph."""
+    key = preset_key.upper()
+    preset = _NOVELTY_PRESETS.get(key, _NOVELTY_PRESETS["OBJECTION"])
+    fill = preset["fill"]
+    tc   = preset["tc"]
+    display = custom_text if custom_text else key  # fallback to preset name
+
+    rect = _sticker_rect(page.rect, position, 168.0, 52.0)
+    cx = (rect.x0 + rect.x1) / 2
+    cy = (rect.y0 + rect.y1) / 2
+    center = fitz.Point(cx, cy)
+
+    use_rotation = abs(rotation) > 0.1
+    morph = (center, fitz.Matrix(rotation)) if use_rotation else None
+
+    # Filled background + thick border
+    shape = page.new_shape()
+    shape.draw_rect(rect)
+    shape.finish(fill=fill, color=tc, width=3.0, morph=morph)
+    shape.commit()
+
+    # Inner highlight line (top accent bar)
+    bar = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x1 - 5, rect.y0 + 8)
+    shape2 = page.new_shape()
+    shape2.draw_rect(bar)
+    shape2.finish(fill=tc, color=None, width=0, morph=morph)
+    shape2.commit()
+
+    if use_rotation:
+        # insert_text supports morph for arbitrary rotation
+        fsize = 11
+        # Place origin at left-centre so morph rotates it into the badge centre
+        text_pt = fitz.Point(rect.x0 + 8, cy + fsize * 0.35)
+        page.insert_text(text_pt, display, fontname="hebo",
+                         fontsize=fsize, color=tc, morph=morph)
+    else:
+        page.insert_textbox(_inner(rect, 8), display,
+                            fontname="hebo", fontsize=11,
+                            color=tc, align=1)
+
+
+# ── Public entry point ────────────────────────────────────────────────────
+
+def apply_sticker(
+    session_dir: Path,
+    filename: str,
+    page_numbers: list[int],
+    sticker_config: dict,
+) -> tuple[str, list[int]]:
+    """
+    Apply a vector sticker/stamp to the specified pages of a PDF.
+
+    sticker_config keys:
+        category    : "legal_exhibit" | "status_stamp" | "novelty"
+        preset      : preset name string (see _EXHIBIT_PRESETS / _NOVELTY_PRESETS)
+        position    : "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center"
+        rotation    : float degrees, -15 to +15 (used for novelty only)
+        custom_text : optional extra label (legal_exhibit label or novelty override)
+
+    Returns (filename, list_of_pages_actually_modified).
+    Raises FileNotFoundError / ValueError on bad input.
+    """
+    if not page_numbers:
+        page_numbers = [1]
+
+    path = _validate_file(session_dir, filename)
+    _backup(path)
+
+    doc = fitz.open(str(path))
+    total_pages = doc.page_count
+
+    category    = sticker_config.get("category", "legal_exhibit").lower()
+    preset      = sticker_config.get("preset", "EXHIBIT").upper()
+    position    = sticker_config.get("position", "bottom-right").lower()
+    rotation    = float(sticker_config.get("rotation", 0))
+    custom_text = sticker_config.get("custom_text", "") or ""
+
+    # Clamp rotation to safe range
+    rotation = max(-15.0, min(15.0, rotation))
+
+    applied: list[int] = []
+    for pnum in page_numbers:
+        if pnum < 1 or pnum > total_pages:
+            continue  # silently skip out-of-range pages
+
+        page = doc[pnum - 1]
+
+        if category == "legal_exhibit":
+            _draw_legal_exhibit(page, position, preset, custom_text)
+        elif category == "status_stamp":
+            _draw_status_stamp(page, position, preset)
+        else:  # novelty
+            _draw_novelty(page, position, preset, rotation, custom_text)
+
+        applied.append(pnum)
+
+    if applied:
+        _safe_save(doc, path)
+        # Invalidate thumbnails for every modified page
+        for pnum in applied:
+            stem = Path(filename).stem
+            thumb = session_dir / f"_thumb_{stem}_p{pnum}.png"
+            thumb.unlink(missing_ok=True)
+
+    doc.close()
+    return filename, applied
