@@ -22,9 +22,10 @@ from .session_mgr import (
     sanitize_filename, cleanup_expired_sessions,
 )
 from .pdf_ops import (
-    apply_sticker, check_has_text, delete_pages, get_all_page_counts, get_page_count,
-    get_thumbnail, highlight_page, merge_pdfs, ocr_pdf, redact_pdf,
-    reorder_pages, rotate_pages, split_pdf, undo_last_op,
+    add_page_numbers, apply_sticker, check_has_text, delete_pages,
+    get_all_page_counts, get_page_count, get_thumbnail, highlight_page,
+    merge_pdfs, ocr_pdf, redact_pdf, reorder_pages, rotate_pages,
+    split_pdf, undo_last_op,
 )
 from .ai_parser import parse_instruction
 
@@ -501,6 +502,25 @@ def _execute_action(session_dir: Path, action: dict) -> str:
         return (
             f"Applied {sticker_config['preset']} {sticker_config['category']} sticker "
             f"to page(s) {pages_str} of {fname}"
+        )
+
+    elif atype == "ADD_PAGE_NUMBERS":
+        fname = action.get("file", "")
+        if not fname:
+            raise ValueError("ADD_PAGE_NUMBERS requires 'file'.")
+        pn_config = {
+            "format":          str(action.get("format", "Page {n} of {total}")),
+            "position":        str(action.get("position", "bottom-center")),
+            "start_page":      int(action.get("start_page", 1)),
+            "skip_first_page": bool(action.get("skip_first_page", False)),
+            "font_size":       int(action.get("font_size", 10)),
+        }
+        _, stamped = add_page_numbers(session_dir, fname, pn_config)
+        pos_label = pn_config["position"]
+        fmt_label = pn_config["format"]
+        return (
+            f"Added page numbers to {stamped} page(s) of {fname} "
+            f"({fmt_label!r} · {pos_label})"
         )
 
     else:

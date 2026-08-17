@@ -20,7 +20,7 @@ from openai import OpenAI
 
 ALLOWED_ACTION_TYPES = {
     "MERGE", "DELETE_PAGES", "SPLIT", "ROTATE", "REORDER",
-    "HIGHLIGHT", "RENAME", "REDACT", "ADD_STICKER"
+    "HIGHLIGHT", "RENAME", "REDACT", "ADD_STICKER", "ADD_PAGE_NUMBERS"
 }
 
 SYSTEM_PROMPT = """You are a PDF structural command parser for a legal document management tool.
@@ -93,7 +93,21 @@ OUTPUT SCHEMA (always return exactly this structure):
      "position": "top-right", "rotation": 0},
     {"type": "ADD_STICKER", "file": "A.pdf", "page_numbers": [3],
      "category": "novelty", "preset": "OBJECTION",
-     "position": "bottom-right", "rotation": -10}
+     "position": "bottom-right", "rotation": -10},
+
+     // ADD_PAGE_NUMBERS: stamp page numbers on every page of a document.
+     // format: use {n} for current page number, {total} for total pages.
+     //         Default: "Page {n} of {total}"
+     // position: "bottom-center" | "bottom-right" | "top-right"  (default: "bottom-center")
+     // start_page: logical number assigned to the first stamped page  (default: 1)
+     // skip_first_page: if true, omit the number on page 1 (e.g. cover pages)  (default: false)
+     // font_size: point size of number text  (default: 10)
+     {"type": "ADD_PAGE_NUMBERS", "file": "A.pdf",
+      "format": "Page {n} of {total}",
+      "position": "bottom-center",
+      "start_page": 1,
+      "skip_first_page": false,
+      "font_size": 10}
   ],
   "summary": "Plain-English description of what will be done."
 }"""

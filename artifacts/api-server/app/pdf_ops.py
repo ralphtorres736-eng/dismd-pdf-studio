@@ -778,3 +778,86 @@ def apply_sticker(
 
     doc.close()
     return filename, applied
+
+
+# ── Page Numbering ────────────────────────────────────────────────────────────
+
+def add_page_numbers(
+    session_dir: Path,
+    filename: str,
+    config: dict,
+) -> tuple[str, int]:
+    """
+    Stamp page numbers onto every page of a PDF using PyMuPDF insert_text.
+
+    config keys:
+        format          : str  — template with {n} and {total}. Default "Page {n} of {total}"
+        position        : "bottom-center" | "bottom-right" | "top-right". Default "bottom-center"
+        start_page      : int  — logical number for the first page. Default 1
+        skip_first_page : bool — omit number on physical page 1. Default False
+        font_size       : int  — point size. Default 10
+
+    Returns (filename, pages_stamped).
+    """
+    path = _validate_file(session_dir, filename)
+    _backup(path)
+
+    fmt         = str(config.get("format", "Page {n} of {total}"))
+    position    = str(config.get("position", "bottom-center")).lower()
+    start_page  = int(config.get("start_page", 1))
+    skip_first  = bool(config.get("skip_first_page", False))
+    font_size   = int(config.get("font_size", 10))
+
+    # Clamp font size to a sane range
+    font_size = max(6, min(24, font_size))
+
+    doc = fitz.open(str(path))
+    total = doc.page_count
+    stamped = 0
+
+    for idx in range(total):
+        if skip_first and idx == 0:
+            continue
+
+        page = doc[idx]
+        rect = page.rect
+        w, h = rect.width, rect.height
+
+        logical_n = start_page + idx
+
+        label = fmt.replace("{n}", str(logical_n)).replace("{total}", str(total))
+
+        # Estimate text width (≈ font_size * 0.5 per char is conservative)
+        approx_w = len(label) * font_size * 0.52
+
+        margin = 18  # points from edge
+
+        if position == "bottom-center":
+            x = (w - approx_w) / 2
+            y = h - margin
+        elif position == "bottom-right":
+            x = w - approx_w - margin
+            y = h - margin
+        elif position == "top-right":
+            x = w - approx_w - margin
+            y = margin + font_size
+        else:
+            # fallback: bottom-center
+            x = (w - approx_w) / 2
+            y = h - margin
+
+        page.insert_text(
+            fitz.Point(x, y),
+            label,
+            fontname="helv",
+            fontsize=font_size,
+            color=(0.0, 0.0, 0.0),
+        )
+        stamped += 1
+
+    if stamped:
+        _safe_save(doc, path)
+        _invalidate_thumb_cache(session_dir, filename)
+
+    doc.close()
+    return filename, stamped

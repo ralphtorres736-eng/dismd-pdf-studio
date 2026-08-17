@@ -1,0 +1,1 @@
+- [PyMuPDF safe-save pattern](pymupdf-safe-save.md) — fitz 1.28.2 raises "save to original must be incremental"; use atomic temp-file replace instead of doc.save(path).
